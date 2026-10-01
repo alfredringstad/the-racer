@@ -36,6 +36,8 @@ export class Car {
   private readonly axleRaised: [boolean | undefined, boolean | undefined] = [undefined, undefined];
   /** Seconds left lying on the ground after a fall (bike). */
   down = 0;
+  /** Small-wheel wobble meter, 0..1; falls at 1 (see VehicleSpec.roughFall). */
+  wobble = 0;
   /** Why we fell, for the HUD. */
   downReason = '';
   /** Set by the scene: returns the rail direction if a move crosses a tram rail. */
@@ -106,6 +108,7 @@ export class Car {
     // Soft speed caps so driving onto grass bleeds speed instead of stopping dead.
     if (vF > s.maxSpeed) vF += (s.maxSpeed - vF) * Math.min(1, 2.5 * dt);
     if (vF < -v.reverseMax) vF += (-v.reverseMax - vF) * Math.min(1, 4 * dt);
+    if (v.governorKmh) vF = Math.min(vF, ((v.governorKmh / 3.6) * TILE_SIZE) / this.map.metresPerTile);
 
     // Lateral: grip bleeds off sideways velocity; low grip → drift.
     const grip = s.grip * v.grip * (input.handbrake ? v.handbrakeGrip : 1);
@@ -150,6 +153,7 @@ export class Car {
     }
 
     this.updateCurbs(dt);
+    if (v.roughFall) this.updateWobble(v.roughFall, dt);
     if (v.sway) this.updateSway(v.sway, input.throttle, dt);
     this.syncSprite(time);
   }
@@ -172,6 +176,17 @@ export class Car {
       this.bump = Math.max(this.bump, this.speed * (raised ? 1 : 0.6));
       this.bumpTimer = BUMP_TIME;
     });
+  }
+
+  private updateWobble(r: NonNullable<VehicleSpec['roughFall']>, dt: number) {
+    if (this.down > 0) {
+      this.wobble = 0;
+      return;
+    }
+    if (this.bump > r.curbSpeed) return this.fall('CURB!');
+    const rough = this.surface.rumble >= r.minRumble && Math.abs(this.forwardSpeed) > r.speed;
+    this.wobble = rough ? this.wobble + dt / r.seconds : Math.max(0, this.wobble - dt * 2);
+    if (this.wobble >= 1) this.fall('TOO BUMPY!');
   }
 
   /** Bike sway: rhythmic while pedalling (tied to distance, so cadence follows speed), a slow balance wobble when crawling. */

@@ -171,7 +171,7 @@ export class RaceScene extends Phaser.Scene {
 
     const kmh = Math.abs(car.forwardSpeed) * (this.track.metresPerTile / TILE_SIZE) * 3.6;
     this.hudSpeed.setText(String(Math.round(kmh)).padStart(3, '0') + ' KM/H');
-    this.hudSurface.setText(car.down > 0 ? car.downReason : car.surface.label);
+    this.hudSurface.setText(car.down > 0 ? car.downReason : car.wobble > 0.35 ? 'WOBBLY!' : car.surface.label);
 
     if (time >= this.nextStreetLookup) {
       this.nextStreetLookup = time + STREET_LOOKUP_MS;

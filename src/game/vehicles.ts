@@ -53,6 +53,14 @@ export interface VehicleSpec {
   railTrap?: { minDeg: number; maxDeg: number; minSpeed: number };
   /** Seconds spent getting back up after a fall. */
   downTime?: number;
+  /** Hard top speed in km/h (as shown in the HUD), on every surface. */
+  governorKmh?: number;
+  /**
+   * Small wheels: going faster than `speed` (px/s) on a surface with at least `minRumble` fills a
+   * wobble meter over `seconds` and throws the rider off when full. Hitting a curb faster than
+   * `curbSpeed` does it at once.
+   */
+  roughFall?: { minRumble: number; speed: number; seconds: number; curbSpeed: number };
 }
 
 export const CAR: VehicleSpec = {
@@ -171,6 +179,64 @@ export const BUS: VehicleSpec = {
 };
 
 /**
+ * EPA-traktor: a car converted to a tractor so teenagers can drive it, governed to 30 km/h.
+ * Pulls hard up to the limiter and then that's it. Boxy, a bit wobbly, and the slow-vehicle
+ * triangle on the back.
+ */
+export const EPA: VehicleSpec = {
+  ...CAR,
+  id: 'epa',
+  name: 'EPA-TRAKTOR',
+  sprite: 'epa',
+  engine: 230,
+  governorKmh: 30,
+  reverseMax: 30,
+  turnRate: 2.6,
+  grip: 0.8,
+  handbrakeGrip: 0.25,
+  halfLength: 6.5,
+  halfWidth: 3.5,
+  skidWheels: [[-5, -3.5], [-5, 3.5]],
+};
+
+/**
+ * Electric kick scooter: tiny, instant pull, turns on the spot. Its small wheels hate cobbles,
+ * grass and curbs, and it falls over at the slightest excuse.
+ */
+export const SCOOTER: VehicleSpec = {
+  id: 'scooter',
+  name: 'E-SCOOTER',
+  sprite: 'scooter',
+  scale: 1.0, // real size, like the bike
+  engine: 260,
+  engineFade: 0.5,
+  brake: 260,
+  reverseAccel: 25,
+  reverseMax: 12,
+  rolling: 22,
+  turnRate: 5.0,
+  turnFullSpeed: 10,
+  grip: 1.6,
+  handbrakeGrip: 0.35,
+  bounce: 0.2,
+  curbLoss: 0.2,
+  halfLength: 5,
+  halfWidth: 1.5,
+  skidWheels: [[-4, 0]],
+  railGrip: 0.45,
+  surfaces: {
+    asphalt: { maxSpeed: 100 },
+    paving: { maxSpeed: 100, accel: 1, drag: 0.4 },
+    cobble: { maxSpeed: 55, accel: 0.6, drag: 1.2, rumble: 1.5 },
+    grass: { maxSpeed: 30, accel: 0.3, drag: 3, rumble: 1.2 },
+  },
+  crashImpact: 50,
+  railTrap: { minDeg: 4, maxDeg: 35, minSpeed: 20 },
+  roughFall: { minRumble: 1, speed: 40, seconds: 0.6, curbSpeed: 70 },
+  downTime: 1.4,
+};
+
+/**
  * Draws every vehicle this much bigger, together with everything tied to its size (hitbox,
  * skid wheels, light positions). At 1 the 16px hatchback is about half real size (1 px = 0.14 m).
  * Specs above stay in unscaled sprite pixels.
@@ -189,7 +255,7 @@ function scaled(v: VehicleSpec): VehicleSpec {
   };
 }
 
-export const VEHICLES: readonly VehicleSpec[] = [CAR, EV, BUS, BIKE].map(scaled);
+export const VEHICLES: readonly VehicleSpec[] = [CAR, EV, BUS, EPA, BIKE, SCOOTER].map(scaled);
 
 export function vehicleById(id: unknown): VehicleSpec {
   return VEHICLES.find((v) => v.id === id) ?? VEHICLES[0];

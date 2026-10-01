@@ -513,6 +513,58 @@ function drawBike(): Img {
   return img;
 }
 
+/** EPA-traktor: a boxy old estate in dark blue, with the red/orange slow-vehicle triangle on the tailgate. */
+function drawEpa(): Img {
+  const img = new Img(16, 16);
+  const edge = '.kdbbbbbbbbbbyk.';
+  const glass = '.kdgbbbbbbggbbk.';
+  const sign = '.rogbbbbbbggbbk.';
+  img.pattern(0, 0, [
+    '................',
+    '................',
+    '................',
+    '...tt......tt...',
+    '.kkkkkkkkkkkkkk.',
+    edge,
+    glass,
+    sign,
+    sign,
+    glass,
+    edge,
+    '.kkkkkkkkkkkkkk.',
+    '...tt......tt...',
+    '................',
+    '................',
+    '................',
+  ], { k: P.ink, b: P.signBlue, d: P.slateDark, g: P.carGlass, y: P.lamp, r: P.awningRed, o: P.gold, t: P.tyre });
+  return img;
+}
+
+/** E-scooter from above: rider standing on a narrow deck, arms out to the handlebar, small wheels. */
+function drawScooter(): Img {
+  const img = new Img(16, 16);
+  const deck = '..tdkbhhkddkt...';
+  img.pattern(0, 0, [
+    '................',
+    '................',
+    '................',
+    '................',
+    '................',
+    '.....kkk...k....',
+    '....kbbbkssk....',
+    deck,
+    deck,
+    '....kbbbkssk....',
+    '.....kkk...k....',
+    '................',
+    '................',
+    '................',
+    '................',
+    '................',
+  ], { k: P.ink, b: P.awningGreen, h: P.trunk, s: P.lamp, d: P.shadow, t: P.tyre });
+  return img;
+}
+
 /** Facing east (rotation 0 in Phaser). 16x16 with transparent margin. `roof` is columns 5-11 of the cabin rows. */
 function car(colors: { b: number; d: number; y: number }, roof: string): Img {
   const img = new Img(16, 16);
@@ -640,6 +692,8 @@ const outputs: Array<[string, () => Img]> = [
   ['public/assets/sprites/ev.png', drawEv],
   ['public/assets/sprites/bike.png', drawBike],
   ['public/assets/sprites/bus.png', drawBus],
+  ['public/assets/sprites/epa.png', drawEpa],
+  ['public/assets/sprites/scooter.png', drawScooter],
   ['public/' + FONT.path, drawFont],
   ['public/assets/sprites/street-lamp.png', drawStreetLamp],
   ['public/assets/lights/round.png', () => drawRoundLight(128)],
