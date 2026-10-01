@@ -592,31 +592,35 @@ function drawBoat(): Img {
 }
 
 /**
- * One section of an articulated tram, seen from above and facing east (56×16): grey roof with
- * gutters, a blue side band with windows, and either a cab (windscreen and lamps at the east end,
- * AC unit on the roof) or a pantograph. The game bends a chain of these along the track.
+ * One section of an articulated tram, seen from above and facing east (56×16), in Norrköping's
+ * livery: teal-green roof, yellow sides with dark windows, and either a cab (yellow nose with a
+ * dark windscreen and lamps at the east end, AC unit on the roof) or a pantograph.
+ * The game bends a chain of these along the track.
  */
 function drawTramSection(cab: boolean): Img {
   const img = new Img(56, 16);
   img.rect(0, 1, 56, 14, P.ink);
-  img.rect(1, 2, 54, 12, P.signBlue);
-  img.rect(1, 3, 54, 10, P.flat);
-  img.rect(1, 4, 54, 1, P.flatDark);
-  img.rect(1, 11, 54, 1, P.flatDark);
-  for (let x = 3; x < 52; x += 7) {
-    img.rect(x, 2, 5, 1, P.carGlass);
-    img.rect(x, 13, 5, 1, P.carGlass);
+  img.rect(1, 2, 54, 12, P.tramYellow);
+  img.rect(1, 5, 54, 6, P.tramGreen);
+  img.rect(1, 5, 54, 1, P.tramGreenDark);
+  img.rect(1, 10, 54, 1, P.tramGreenDark);
+  img.rect(1, 4, 54, 1, P.tramYellowDark);
+  img.rect(1, 11, 54, 1, P.tramYellowDark);
+  for (let x = 3; x < 50; x += 7) {
+    img.rect(x, 3, 5, 1, P.shadow);
+    img.rect(x, 12, 5, 1, P.shadow);
   }
   if (cab) {
     img.set(55, 1, 0, 0);
     img.set(55, 14, 0, 0);
-    img.rect(51, 3, 3, 10, P.carGlass);
+    img.rect(49, 2, 6, 12, P.tramYellow);
+    img.rect(51, 3, 3, 10, P.shadow);
     img.rect(54, 2, 1, 12, P.ink);
     img.set(54, 3, P.lamp);
     img.set(54, 12, P.lamp);
-    img.rect(18, 5, 16, 6, P.flatDark);
+    img.rect(18, 6, 16, 4, P.tramGreenDark);
   } else {
-    img.rect(22, 5, 12, 6, P.flatDark);
+    img.rect(22, 5, 12, 6, P.tramGreenDark);
     for (let i = 0; i < 12; i++) {
       img.set(22 + i, 5 + Math.round((i * 5) / 11), P.ink);
       img.set(22 + i, 10 - Math.round((i * 5) / 11), P.ink);

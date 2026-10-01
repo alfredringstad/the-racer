@@ -75,6 +75,12 @@ export const PALETTE = {
   carGlass: 0x9fd3e8,
   busBody: 0xe8893a, // folkabuss orange
   busDark: 0xb8682c,
+  // Norrköping tram livery, sampled from a photo of a Flexity Classic on line 2
+  // (commons.wikimedia.org/wiki/File:Flexity_Classic_Norrköping.jpg, Espen Franck-Nielsen, CC BY 4.0).
+  tramYellow: 0xecae2f,
+  tramYellowDark: 0xc98a22,
+  tramGreen: 0x2a8278,
+  tramGreenDark: 0x0e6158,
   tyre: 0x2b2a3a,
 
   uiBg: 0x2b2a3a,
