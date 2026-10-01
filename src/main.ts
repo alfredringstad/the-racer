@@ -1,12 +1,30 @@
 import Phaser from 'phaser';
+import { BootScene } from './scenes/BootScene';
+import { RaceScene } from './scenes/RaceScene';
+import { CreditsScene } from './scenes/CreditsScene';
+import { PALETTE, hex } from './game/palette';
 
-new Phaser.Game({
-  type: Phaser.AUTO,
+// Game Boy is 160×144; we go a bit wider for more look-ahead while driving.
+export const GAME_WIDTH = 192;
+export const GAME_HEIGHT = 144;
+
+const game = new Phaser.Game({
+  type: Phaser.WEBGL,
   parent: 'game',
-  width: 192,
-  height: 144,
+  width: GAME_WIDTH,
+  height: GAME_HEIGHT,
   pixelArt: true,
-  backgroundColor: '#e0f0d0',
-  scale: { mode: Phaser.Scale.NONE, zoom: 4 },
-  scene: { create() { this.add.text(8, 8, 'hello', { fontSize: '8px', color: '#203020' }); } },
+  backgroundColor: hex(PALETTE.ink),
+  scale: {
+    mode: Phaser.Scale.NONE,
+    zoom: Phaser.Scale.MAX_ZOOM, // largest integer multiple that fits
+    autoCenter: Phaser.Scale.CENTER_BOTH,
+  },
+  scene: [BootScene, RaceScene, CreditsScene],
 });
+
+// Keep the integer zoom in sync with the window.
+window.addEventListener('resize', () => game.scale.setMaxZoom());
+
+// Handy for poking at state from the devtools console.
+if (import.meta.env.DEV) (window as unknown as { game: Phaser.Game }).game = game;

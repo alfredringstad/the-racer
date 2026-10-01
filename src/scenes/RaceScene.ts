@@ -1,0 +1,99 @@
+import Phaser from 'phaser';
+import { Car } from '../game/Car';
+import { Controls } from '../game/input';
+import { TrackMap } from '../game/TrackMap';
+import { FONT, fontSafe } from '../game/font';
+import { PALETTE } from '../game/palette';
+import { PX_PER_S_TO_KMH } from '../game/surfaces';
+
+const SKID_POOL = 600;
+const SKID_SLIP = 22; // px/s of sideways speed before tyres leave marks
+const LOOKAHEAD = 0.35; // seconds of velocity the camera leads by
+
+export class RaceScene extends Phaser.Scene {
+  private track!: TrackMap;
+  private car!: Car;
+  private controls!: Controls;
+  private hudSpeed!: Phaser.GameObjects.BitmapText;
+  private hudSurface!: Phaser.GameObjects.BitmapText;
+  private skids: Phaser.GameObjects.Image[] = [];
+  private skidIndex = 0;
+  private look = new Phaser.Math.Vector2();
+
+  constructor() {
+    super('Race');
+  }
+
+  create() {
+    this.track = new TrackMap(this, 'norrkoping');
+    const spawn = this.track.spawn();
+    this.car = new Car(this, this.track, spawn.x, spawn.y, spawn.heading);
+    this.controls = new Controls(this);
+
+    for (let i = 0; i < SKID_POOL; i++)
+      this.skids.push(this.add.image(-10, -10, 'px').setTint(PALETTE.ink).setAlpha(0.3).setDepth(5).setVisible(false));
+
+    const cam = this.cameras.main;
+    cam.setBounds(0, 0, this.track.widthPx, this.track.heightPx);
+    cam.setRoundPixels(true);
+    cam.startFollow(this.car, true, 0.12, 0.12);
+    cam.setBackgroundColor(PALETTE.ink);
+
+    this.createHud();
+
+    this.input.keyboard!.on('keydown-C', () => {
+      this.scene.pause();
+      this.scene.launch('Credits');
+    });
+    this.input.keyboard!.on('keydown-R', () => this.scene.restart());
+  }
+
+  private text(x: number, y: number, s: string, color: number = PALETTE.uiText) {
+    return this.add.bitmapText(x, y, FONT.key, fontSafe(s)).setTint(color).setScrollFactor(0).setDepth(100);
+  }
+
+  private createHud() {
+    const { width, height } = this.scale;
+    this.add.image(0, 0, 'px').setOrigin(0).setDisplaySize(56, 17).setTint(PALETTE.uiBg).setAlpha(0.75).setScrollFactor(0).setDepth(99);
+    this.hudSpeed = this.text(3, 2, '000 KM/H', PALETTE.uiAccent);
+    this.hudSurface = this.text(3, 9, '');
+
+    const credit = this.text(2, height - 8, '(C) OPENSTREETMAP CONTRIBUTORS').setAlpha(0.7);
+    this.add.image(0, height - 9, 'px').setOrigin(0).setDisplaySize(credit.width + 4, 9).setTint(PALETTE.uiBg).setAlpha(0.5).setScrollFactor(0).setDepth(99);
+
+    const hint = this.text(0, 24, 'ARROWS/WASD DRIVE\nSPACE HANDBRAKE\nR RESET  C CREDITS');
+    hint.setX(Math.round((width - hint.width) / 2)).setCenterAlign();
+    const box = this.add.image(hint.x - 4, hint.y - 3, 'px').setOrigin(0).setDisplaySize(hint.width + 8, hint.height + 5)
+      .setTint(PALETTE.uiBg).setAlpha(0.8).setScrollFactor(0).setDepth(99);
+    this.time.delayedCall(5000, () => this.tweens.add({ targets: [hint, box], alpha: 0, duration: 600 }));
+  }
+
+  update(time: number, delta: number) {
+    const car = this.car;
+    const input = this.controls.read();
+    car.update(input, delta, time);
+
+    // Camera leads the car a little in the direction of travel.
+    const k = 1 - Math.exp(-delta / 250);
+    this.look.x += (car.vx * LOOKAHEAD - this.look.x) * k;
+    this.look.y += (car.vy * LOOKAHEAD - this.look.y) * k;
+    this.cameras.main.setFollowOffset(-this.look.x, -this.look.y);
+    if (car.impact > 45) this.cameras.main.shake(120, Math.min(0.02, car.impact / 6000));
+
+    if (Math.abs(car.slip) > SKID_SLIP || (input.handbrake && car.speed > 30)) this.dropSkids();
+
+    this.hudSpeed.setText(String(Math.round(Math.abs(car.forwardSpeed) * PX_PER_S_TO_KMH)).padStart(3, '0') + ' KM/H');
+    this.hudSurface.setText(car.surface.label);
+  }
+
+  /** Two dark pixels under the rear wheels, recycled from a fixed pool. */
+  private dropSkids() {
+    const c = Math.cos(this.car.heading);
+    const s = Math.sin(this.car.heading);
+    for (const side of [-3.5, 3.5]) {
+      const skid = this.skids[this.skidIndex];
+      this.skidIndex = (this.skidIndex + 1) % SKID_POOL;
+      skid.setPosition(Math.round(this.car.x - 4 * c - side * s), Math.round(this.car.y - 4 * s + side * c)).setVisible(true);
+    }
+  }
+}

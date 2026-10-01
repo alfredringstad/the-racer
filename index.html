@@ -8,10 +8,13 @@
       html, body { margin: 0; height: 100%; background: #1b1f2a; overflow: hidden; }
       #game { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
       canvas { image-rendering: pixelated; image-rendering: crisp-edges; }
+      #attribution { position: fixed; right: 8px; bottom: 6px; font: 11px system-ui, sans-serif; color: #b8b2a2; }
+      #attribution a { color: #e8dfc8; }
     </style>
   </head>
   <body>
     <div id="game"></div>
+    <div id="attribution">Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a> (ODbL)</div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

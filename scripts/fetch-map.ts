@@ -205,6 +205,8 @@ function buildMap(cache: Cache) {
 
   const ground = new Grid<Ground>(cols, rows, 'paving');
   const trees = new Grid<boolean>(cols, rows, false);
+  /** Tiles stroked from a main road way (not parking lots or squares) — spawn candidates. */
+  const mainRoad = new Grid<boolean>(cols, rows, false);
 
   // Polygons of an element: closed ways, or joined multipolygon rings.
   const ringsOf = (el: OsmElement): Vec[][] => {
@@ -255,7 +257,11 @@ function buildMap(cache: Cache) {
     const t = w.tags!;
     const surface = t.surface ?? (t.highway === 'pedestrian' || t.highway === 'living_street' ? 'sett' : 'asphalt');
     const kind: Ground = COBBLE_SURFACES.has(surface) ? 'cobble' : 'asphalt';
-    strokeLine(ground, w.geometry.map(toTile), ROAD_WIDTH[t.highway], (c, r) => ground.set(c, r, kind));
+    const width = ROAD_WIDTH[t.highway];
+    strokeLine(ground, w.geometry.map(toTile), width, (c, r) => {
+      ground.set(c, r, kind);
+      if (width >= 3 && kind === 'asphalt') mainRoad.set(c, r, true);
+    });
   }
 
   // Trees: mapped single trees and tree rows, only on open (non-road) ground.
@@ -298,8 +304,8 @@ function buildMap(cache: Cache) {
       if (trees.get(c, r)) decorIds[i] = T.TREE;
     }
 
-  // 4. Spawn: the drivable tile nearest the centre with a fully drivable 5×5 around it.
-  const spawn = findSpawn(ground, cols, rows);
+  // 4. Spawn: on a straight stretch of main road, as close to the centre as possible.
+  const spawn = findSpawn(ground, mainRoad, cols, rows);
 
   const counts: Record<string, number> = {};
   for (const g of ground.cells) counts[g] = (counts[g] ?? 0) + 1;
@@ -308,29 +314,27 @@ function buildMap(cache: Cache) {
   return { cols, rows, groundIds, decorIds, spawn, rotation, origin, minU, maxV, tileToLatLon, ground, trees };
 }
 
-function findSpawn(ground: Grid<Ground>, cols: number, rows: number) {
-  const cx = cols / 2;
-  const cy = rows / 2;
-  let best: { c: number; r: number; d: number } | undefined;
-  for (let r = 2; r < rows - 2; r++)
-    for (let c = 2; c < cols - 2; c++) {
-      if (ground.get(c, r) !== 'asphalt') continue;
-      let ok = true;
-      for (let dr = -2; dr <= 2 && ok; dr++) for (let dc = -2; dc <= 2 && ok; dc++) ok = isRoad(ground.get(c + dc, r + dr));
-      if (!ok) continue;
-      const d = Math.hypot(c - cx, r - cy);
-      if (!best || d < best.d) best = { c, r, d };
-    }
-  if (!best) throw new Error('No spawn point found');
-  // Face along whichever axis has the longer straight run of road.
-  const run = (dc: number, dr: number) => {
+function findSpawn(ground: Grid<Ground>, mainRoad: Grid<boolean>, cols: number, rows: number) {
+  const road = (c: number, r: number) => isRoad(ground.get(c, r));
+  const run = (c: number, r: number, dc: number, dr: number) => {
     let n = 0;
-    while (isRoad(ground.get(best!.c + dc * (n + 1), best!.r + dr * (n + 1)))) n++;
+    while (n < 20 && road(c + dc * (n + 1), r + dr * (n + 1))) n++;
     return n;
   };
-  const horizontal = run(1, 0) + run(-1, 0) >= run(0, 1) + run(0, -1);
-  const heading = horizontal ? (run(1, 0) >= run(-1, 0) ? 0 : 180) : run(0, -1) >= run(0, 1) ? -90 : 90;
-  return { x: (best.c + 0.5) * TILE_SIZE, y: (best.r + 0.5) * TILE_SIZE, heading };
+  let best: { c: number; r: number; d: number; heading: number } | undefined;
+  for (let r = 2; r < rows - 2; r++)
+    for (let c = 2; c < cols - 2; c++) {
+      if (!mainRoad.get(c, r)) continue;
+      // Middle of the carriageway: road on both sides, and a long straight run along one axis.
+      const [e, w, s, n] = [run(c, r, 1, 0), run(c, r, -1, 0), run(c, r, 0, 1), run(c, r, 0, -1)];
+      const horizontal = e >= 8 && w >= 8 && n >= 1 && s >= 1 && n + s <= 3;
+      const vertical = n >= 8 && s >= 8 && e >= 1 && w >= 1 && e + w <= 3;
+      if (!horizontal && !vertical) continue;
+      const d = Math.hypot(c - cols / 2, r - rows / 2);
+      if (!best || d < best.d) best = { c, r, d, heading: horizontal ? 0 : -90 };
+    }
+  if (!best) throw new Error('No spawn point found');
+  return { x: (best.c + 0.5) * TILE_SIZE, y: (best.r + 0.5) * TILE_SIZE, heading: best.heading };
 }
 
 function hash(x: number, y: number, seed: number) {
