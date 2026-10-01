@@ -7,6 +7,7 @@ import { PALETTE } from '../game/palette';
 import { TILE_SIZE } from '../game/tiles';
 import { StreetIndex } from '../game/StreetIndex';
 import { TramNetwork } from '../game/TramNetwork';
+import { NightLighting } from '../game/Lighting';
 import { VEHICLES, vehicleById } from '../game/vehicles';
 
 const SKID_POOL = 600;
@@ -38,6 +39,7 @@ export class RaceScene extends Phaser.Scene {
   private tram!: TramNetwork;
   private streetName: string | undefined;
   private nextStreetLookup = 0;
+  private lighting!: NightLighting;
   private wasDown = false;
 
   constructor() {
@@ -50,7 +52,10 @@ export class RaceScene extends Phaser.Scene {
     this.streets = new StreetIndex(mapData);
     this.tram = new TramNetwork(mapData, this.track.metresPerTile, (x, y) => this.track.surfaceAt(x, y));
     this.track.railTiles = this.tram.railTiles;
-    this.track.chunkOverlay = (key, x, y, w, h) => this.tram.drawChunk(this, key, x, y, w, h);
+    this.track.chunkDecorators.push((key, x, y, w, h) => {
+      const rails = this.tram.drawChunk(this, key, x, y, w, h);
+      return rails && { objects: [rails], textures: [key] };
+    });
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.track.destroy());
     this.streetName = undefined;
     this.skids = [];
@@ -72,6 +77,10 @@ export class RaceScene extends Phaser.Scene {
     this.track.updateChunks(cam.worldView);
     cam.setBackgroundColor(PALETTE.ink);
 
+    // Night mode persists across restarts; ?night in the URL starts at night.
+    const night = (this.registry.get('night') as boolean | undefined) ?? new URLSearchParams(location.search).has('night');
+    this.lighting = new NightLighting(this, this.track, night);
+
     this.createHud();
 
     this.input.keyboard!.on('keydown-C', () => {
@@ -79,6 +88,10 @@ export class RaceScene extends Phaser.Scene {
       this.scene.launch('Credits');
     });
     this.input.keyboard!.on('keydown-R', () => this.scene.restart());
+    this.input.keyboard!.on('keydown-N', () => {
+      this.lighting.toggle();
+      this.registry.set('night', this.lighting.isNight);
+    });
     this.input.keyboard!.on('keydown-V', () => {
       const i = VEHICLES.indexOf(this.car.spec);
       this.registry.set('vehicle', VEHICLES[(i + 1) % VEHICLES.length].id);
@@ -99,7 +112,7 @@ export class RaceScene extends Phaser.Scene {
     const credit = this.text(2, height - 8, '(C) OPENSTREETMAP CONTRIBUTORS').setAlpha(0.7);
     this.add.image(0, height - 9, 'px').setOrigin(0).setDisplaySize(credit.width + 4, 9).setTint(PALETTE.uiBg).setAlpha(0.5).setScrollFactor(0).setDepth(99);
 
-    const hint = this.text(0, 24, `${this.car.spec.name}\n\nARROWS/WASD DRIVE\nSPACE HANDBRAKE\nV VEHICLE  R RESET\nC CREDITS`);
+    const hint = this.text(0, 24, `${this.car.spec.name}\n\nARROWS/WASD DRIVE\nSPACE HANDBRAKE\nV VEHICLE  N NIGHT\nR RESET  C CREDITS`);
     hint.setX(Math.round((width - hint.width) / 2)).setCenterAlign();
     const box = this.add.image(hint.x - 4, hint.y - 3, 'px').setOrigin(0).setDisplaySize(hint.width + 8, hint.height + 5)
       .setTint(PALETTE.uiBg).setAlpha(0.8).setScrollFactor(0).setDepth(99);
@@ -148,6 +161,10 @@ export class RaceScene extends Phaser.Scene {
     if (car.down > 0 && !this.wasDown) this.cameras.main.shake(200, 0.012);
     this.wasDown = car.down > 0;
     if (car.impact > 45) this.cameras.main.shake(120, Math.min(0.02, car.impact / 6000));
+
+    // Lamp posts draw over the car when it's behind (north of) them, under it otherwise.
+    for (const lamp of this.track.lampSprites) lamp.setDepth(lamp.y > car.y ? 11 : 9.5);
+    this.lighting.update(delta, car, input.brake && car.forwardSpeed > 5);
 
     if (Math.abs(car.slip) > SKID_SLIP || (input.handbrake && car.speed > 30)) this.dropSkids();
 

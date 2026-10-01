@@ -93,3 +93,21 @@ export function samplePolyline(line: Vec[], step: number): Vec[] {
   }
   return out;
 }
+
+/** Like samplePolyline, but each sample also carries the unit direction of travel: [x, y, dx, dy]. */
+export function samplePolylineWithDir(line: Vec[], step: number): [number, number, number, number][] {
+  const out: [number, number, number, number][] = [];
+  let carry = 0;
+  for (let i = 1; i < line.length; i++) {
+    const [ax, ay] = line[i - 1];
+    const [bx, by] = line[i];
+    const len = Math.hypot(bx - ax, by - ay);
+    if (!len) continue;
+    const dx = (bx - ax) / len;
+    const dy = (by - ay) / len;
+    let d = carry;
+    for (; d < len; d += step) out.push([ax + dx * d, ay + dy * d, dx, dy]);
+    carry = d - len;
+  }
+  return out;
+}

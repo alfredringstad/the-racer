@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { overpass, type LatLon, type OsmElement, type OsmNode, type OverpassResponse, type OsmWay } from './lib/overpass';
 import { buildingStyle, hasOutdoorSeating, POI_QUERY, poiFacade } from './lib/buildings';
 import { dominantGridAngle, Projection, relationRings, type Vec } from './lib/geo';
-import { fillRings, Grid, samplePolyline, strokeLine } from './lib/raster';
+import { fillRings, Grid, samplePolyline, samplePolylineWithDir, strokeLine } from './lib/raster';
 import { Img } from './lib/png';
 import { DIAG_INDEX, E, N, S, T, TILE_COUNT, TILE_SIZE, TILESET_COLUMNS, TILESET_ROWS, W, lowerWallId, roofId, surfaceOfTileId, tileName, upperWallId, BUILDING_STYLES, FACADES, type BuildingStyle, type Facade } from '../src/game/tiles';
 import { PALETTE } from '../src/game/palette';
@@ -73,6 +73,11 @@ const STOREFRONT_HALF_TILES = 1;
 const TRAM_BRIDGE_M = 6.75;
 /** Tram stop signs go on open ground within this distance (metres) of the stop node. */
 const STOP_SIGN_SEARCH_M = 9;
+/** Generated street lamps: spacing along a street (alternating sides) and minimum gap between any two lamps. */
+const LAMP_SPACING_M = 24;
+const LAMP_MIN_GAP_M = 11;
+/** How far outside the drawn road edge a generated lamp stands, in metres. */
+const LAMP_CURB_OFFSET_M = 0.9;
 /** Spacing of trees along natural=tree_row, in metres. */
 const TREE_ROW_SPACING_M = 7;
 
@@ -116,6 +121,7 @@ function featuresQuery(b: Cache['featuresBbox']) {
   way["amenity"="parking"];
   way["place"="square"];
   node["natural"="tree"];${POI_QUERY}
+  node["highway"="street_lamp"];
   way["railway"="tram"];
   way["railway"="platform"];
   node["railway"="tram_stop"];
@@ -540,7 +546,51 @@ function buildMap(cache: Cache) {
     stops: tramStops.map((n) => ({ id: n.id, name: tag(n, 'name')!, ...px(toTile(n)) })).filter(inside),
   };
 
-  return { cols, rows, groundIds, decorIds, spawn, rotation, origin, minU, maxV, tileToLatLon, ground, trees, streets: named, tram };
+  // 6. Street lamps: the (few) mapped ones, then generated ones along every street not tagged lit=no.
+  const lamps: { x: number; y: number; source: 'osm' | 'generated' }[] = [];
+  const lampGrid = new Map<string, { x: number; y: number }[]>();
+  const gapPx = (LAMP_MIN_GAP_M / METRES_PER_TILE) * TILE_SIZE;
+  const lampKey = (x: number, y: number) => `${Math.floor(x / gapPx)},${Math.floor(y / gapPx)}`;
+  const tooClose = (x: number, y: number) => {
+    const [gx, gy] = lampKey(x, y).split(',').map(Number);
+    for (let dy = -1; dy <= 1; dy++)
+      for (let dx = -1; dx <= 1; dx++)
+        for (const l of lampGrid.get(`${gx + dx},${gy + dy}`) ?? []) if (Math.hypot(l.x - x, l.y - y) < gapPx) return true;
+    return false;
+  };
+  const addLamp = (x: number, y: number, source: 'osm' | 'generated') => {
+    lamps.push({ x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10, source });
+    const k = lampKey(x, y);
+    if (!lampGrid.has(k)) lampGrid.set(k, []);
+    lampGrid.get(k)!.push({ x, y });
+  };
+  for (const el of els)
+    if (el.type === 'node' && tag(el, 'highway') === 'street_lamp') {
+      const p = px(toTile(el));
+      if (inside(p)) addLamp(p.x, p.y, 'osm');
+    }
+  const lampSpot = (x: number, y: number) => {
+    const c = Math.floor(x / TILE_SIZE);
+    const r = Math.floor(y / TILE_SIZE);
+    const g = ground.get(c, r);
+    return (g === 'paving' || g === 'grass' || g === 'platform') && !trees.get(c, r) && extraDecor.get(c, r) === undefined;
+  };
+  for (const w of roads) {
+    if (w.tags?.lit === 'no') continue;
+    const line = w.geometry.map(toTile);
+    const halfPx = (ROAD_WIDTH[w.tags!.highway] / 2) * TILE_SIZE + (LAMP_CURB_OFFSET_M / METRES_PER_TILE) * TILE_SIZE;
+    const step = LAMP_SPACING_M / METRES_PER_TILE / 2; // half spacing: lamps alternate sides
+    samplePolylineWithDir(line, step).forEach(([x, y, dx, dy], i) => {
+      if (i === 0) return; // skip the very start (usually a junction)
+      const side = i % 2 ? 1 : -1;
+      const lx = x * TILE_SIZE - dy * halfPx * side;
+      const ly = y * TILE_SIZE + dx * halfPx * side;
+      if (inside({ x: lx, y: ly }) && lampSpot(lx, ly) && !tooClose(lx, ly)) addLamp(lx, ly, 'generated');
+    });
+  }
+  console.log(`Street lamps: ${lamps.filter((l) => l.source === 'osm').length} mapped, ${lamps.filter((l) => l.source === 'generated').length} generated`);
+
+  return { cols, rows, groundIds, decorIds, spawn, rotation, origin, minU, maxV, tileToLatLon, ground, trees, streets: named, tram, lamps };
 }
 
 function findSpawn(ground: Grid<Ground>, mainRoad: Grid<boolean>, cols: number, rows: number) {
@@ -613,8 +663,8 @@ function toTiled(m: ReturnType<typeof buildMap>, cache: Cache) {
     height: m.rows,
     tilewidth: TILE_SIZE,
     tileheight: TILE_SIZE,
-    nextlayerid: 6,
-    nextobjectid: m.streets.length + m.tram.tracks.length + m.tram.stops.length + 2,
+    nextlayerid: 7,
+    nextobjectid: m.streets.length + m.tram.tracks.length + m.tram.stops.length + m.lamps.length + 2,
     properties: [
       { name: 'attribution', type: 'string', value: cache.attribution },
       { name: 'osmTimestamp', type: 'string', value: cache.features.osm3s?.timestamp_osm_base ?? cache.fetchedAt },
@@ -747,6 +797,30 @@ function toTiled(m: ReturnType<typeof buildMap>, cache: Cache) {
           })),
         ],
       },
+      {
+        // Street lamps as points at the foot of the post; 'source' is osm or generated.
+        id: 6,
+        name: 'lights',
+        type: 'objectgroup',
+        draworder: 'topdown',
+        opacity: 1,
+        visible: true,
+        x: 0,
+        y: 0,
+        objects: m.lamps.map((l, i) => ({
+          id: m.streets.length + m.tram.tracks.length + m.tram.stops.length + 2 + i,
+          name: '',
+          type: 'street_lamp',
+          x: l.x,
+          y: l.y,
+          width: 0,
+          height: 0,
+          point: true,
+          rotation: 0,
+          visible: true,
+          properties: [{ name: 'source', type: 'string', value: l.source }],
+        })),
+      },
     ],
   };
 }
@@ -784,6 +858,7 @@ function preview(m: ReturnType<typeof buildMap>): Img {
       d === T.STEEPLE ? PALETTE.gold : d === T.CAFE_TABLES ? PALETTE.awningRed : d >= 0 ? PALETTE.tree : colourOf(m.groundIds[i]);
     img.set(i % m.cols, Math.floor(i / m.cols), colour);
   }
+  for (const l of m.lamps) img.set(Math.floor(l.x / TILE_SIZE), Math.floor(l.y / TILE_SIZE), PALETTE.lamp);
   for (const t of m.tram.tracks)
     for (let i = 1; i < t.points.length; i++) {
       const a = t.points[i - 1];

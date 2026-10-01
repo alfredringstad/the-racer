@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import type { DriveInput } from './input';
 import type { SurfaceParams } from './surfaces';
-import type { TrackMap } from './TrackMap';
+import { LAMP_RADIUS, type TrackMap } from './TrackMap';
 import { surfacesFor, type VehicleSpec, type VehicleSurfaces } from './vehicles';
 
 const SPRITE_ANGLE_STEPS = 32; // sprite rotation snaps to this many directions for a crisp retro look
@@ -144,6 +144,12 @@ export class Car {
     const c = Math.cos(heading);
     const s = Math.sin(heading);
     for (const [px, py] of this.probes) if (this.map.isSolidAt(x + px * c - py * s, y + px * s + py * c)) return true;
+    // Lamp posts: thin round obstacles, tested against the vehicle's rotated box.
+    for (const o of this.map.obstaclesNear(x, y)) {
+      const dx = o.x - x;
+      const dy = o.y - y;
+      if (Math.abs(dx * c + dy * s) < this.spec.halfLength + LAMP_RADIUS && Math.abs(-dx * s + dy * c) < this.spec.halfWidth + LAMP_RADIUS) return true;
+    }
     return false;
   }
 

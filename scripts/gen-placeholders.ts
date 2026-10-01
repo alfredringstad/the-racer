@@ -1,4 +1,4 @@
-// Generates placeholder PNGs (tileset, vehicle sprites, pixel font) into public/assets.
+// Generates placeholder PNGs (tileset, car sprite, pixel font) into public/assets.
 // Existing files are left alone so hand-made art isn't clobbered; pass --force to overwrite.
 //
 //   npm run gen-placeholders [-- --force]
@@ -487,6 +487,78 @@ function car(colors: { b: number; d: number; y: number }, roof: string): Img {
   return img;
 }
 
+function drawStreetLamp(): Img {
+  // 8×24, foot at the bottom centre (the map point), lantern at the top.
+  const img = new Img(8, 24);
+  img.pattern(0, 0, [
+    '..kkkk..',
+    '.kllllk.',
+    '.kllllk.',
+    'kkkkkkkk',
+    '...pp...',
+    '...pp...',
+    '...pp...',
+    '...pp...',
+    '...pp...',
+    '...pp...',
+    '...pp...',
+    '...pp...',
+    '...pp...',
+    '...pp...',
+    '...pp...',
+    '...pp...',
+    '...pp...',
+    '...pp...',
+    '...pp...',
+    '...pp...',
+    '..pppp..',
+    '..kkkk..',
+    '..ssss..',
+    '........',
+  ], { k: P.ink, l: P.lamp, p: P.railDark, s: P.shadow });
+  return img;
+}
+
+/** 4×4 Bayer matrix, for dithered light falloff. */
+const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map((v) => (v + 0.5) / 16);
+/** Light intensity (0–1) quantised into a few bands with a dithered edge between them. */
+function bandedLight(img: Img, x: number, y: number, intensity: number) {
+  const bands = 4;
+  const v = Math.max(0, Math.min(1, intensity)) * bands;
+  const level = Math.floor(v) + (v % 1 > BAYER[(y % 4) * 4 + (x % 4)] ? 1 : 0);
+  const c = Math.round((Math.min(level, bands) / bands) * 255);
+  if (c > 0) img.set(x, y, (c << 16) | (c << 8) | c);
+}
+
+function drawRoundLight(size: number): Img {
+  const img = new Img(size, size);
+  const r = size / 2;
+  for (let y = 0; y < size; y++)
+    for (let x = 0; x < size; x++) {
+      const d = Math.hypot(x + 0.5 - r, y + 0.5 - r) / r;
+      if (d < 1) bandedLight(img, x, y, Math.pow(1 - d, 1.4));
+    }
+  return img;
+}
+
+/** Headlight beam: origin at the middle of the left edge, pointing right. */
+function drawConeLight(): Img {
+  const w = 112;
+  const h = 72;
+  const img = new Img(w, h);
+  const spread = (24 * Math.PI) / 180;
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) {
+      const dx = x + 0.5;
+      const dy = y + 0.5 - h / 2;
+      const a = Math.abs(Math.atan2(dy, dx));
+      const d = Math.hypot(dx, dy) / w;
+      if (a > spread || d > 1) continue;
+      bandedLight(img, x, y, (1 - d) * (1 - Math.pow(a / spread, 2)) * 1.15);
+    }
+  return img;
+}
+
 function drawFont(): Img {
   const rows = Math.ceil(FONT.chars.length / FONT.charsPerRow);
   const img = new Img(FONT.charsPerRow * FONT.cellWidth, rows * FONT.cellHeight);
@@ -503,9 +575,13 @@ function drawFont(): Img {
 const outputs: Array<[string, () => Img]> = [
   ['public/assets/tiles/tiles.png', drawTileset],
   ['public/assets/sprites/car.png', drawCar],
-  ['public/assets/sprites/bike.png', drawBike],
   ['public/assets/sprites/ev.png', drawEv],
+  ['public/assets/sprites/bike.png', drawBike],
   ['public/' + FONT.path, drawFont],
+  ['public/assets/sprites/street-lamp.png', drawStreetLamp],
+  ['public/assets/lights/round.png', () => drawRoundLight(128)],
+  ['public/assets/lights/small.png', () => drawRoundLight(24)],
+  ['public/assets/lights/cone.png', drawConeLight],
 ];
 
 for (const [rel, draw] of outputs) {

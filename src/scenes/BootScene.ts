@@ -11,6 +11,8 @@ export class BootScene extends Phaser.Scene {
     this.load.image('tiles', 'assets/tiles/tiles.png');
     for (const v of VEHICLES) this.load.image(v.sprite, `assets/sprites/${v.sprite}.png`);
     this.load.image(FONT.key, FONT.path);
+    this.load.image('street-lamp', 'assets/sprites/street-lamp.png');
+    for (const l of ['round', 'small', 'cone']) this.load.image(`light-${l}`, `assets/lights/${l}.png`);
     // Parsed by TrackMap itself (chunked rendering), so it's loaded as plain JSON.
     this.load.json('norrkoping', 'assets/maps/norrkoping.json');
   }

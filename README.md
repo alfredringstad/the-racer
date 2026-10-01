@@ -31,6 +31,7 @@ after `npm install`.
 | ↓ / S | Brake, then reverse |
 | ← → / A D | Steer |
 | Space | Handbrake (drift) |
+| N | Toggle night (also `?night` in the URL) |
 | R | Reset to start |
 | C | Credits |
 
@@ -64,10 +65,13 @@ What the script does:
 6. Adds Norrköping's trams: tram tracks (`railway=tram`, with line numbers from the route relations), stops
    (`railway=tram_stop`) with a stop sign, platforms with a yellow tactile edge, and a deck where tracks cross water
    on their own bridge. Tram/bus-only streets (`highway=service` with rails or bus lanes) are drivable.
-7. Writes a Tiled-compatible JSON map with `ground` and `decor` tile layers, an `objects` layer (spawn point), a
+7. Places street lamps: the few mapped in OSM (`highway=street_lamp`), plus generated ones every ~24 m on
+   alternating sides of every street not tagged `lit=no`, just outside the curb.
+8. Writes a Tiled-compatible JSON map with `ground` and `decor` tile layers, an `objects` layer (spawn point), a
    `streets` layer (named roads as polylines, squares as polygons, used for the street sign in the HUD) and a
-   `tram` layer (track centrelines as polylines, stops as points).
-8. Writes `data/map-preview.png` (one pixel per tile) so you can check the result quickly.
+   `tram` layer (track centrelines as polylines, stops as points) and a `lights` layer (street lamps as points,
+   `source` = `osm` or `generated`; move or delete them freely in Tiled).
+9. Writes `data/map-preview.png` (one pixel per tile) so you can check the result quickly.
 
 Tunables (tile size in metres, margin, road widths, storefront search radius) are at the top of
 `scripts/fetch-map.ts`. Which OSM tags become which building style or storefront is in `scripts/lib/buildings.ts`.
@@ -98,6 +102,9 @@ It only writes files that don't exist yet, so once you've drawn your own art it 
 
   Keep this layout, or update `src/game/tiles.ts`. Every tile has a `name` property in the Tiled tileset.
 - `public/assets/sprites/car.png` — 16×16, facing east (right).
+- `public/assets/sprites/street-lamp.png`: 8×24, foot of the post at row 21.
+- `public/assets/lights/{round,small,cone}.png`: greyscale light shapes for night mode (white = full light,
+  tinted in code). `cone` is the headlight beam, with its origin at the middle of the left edge.
 - `public/assets/fonts/pixel-font.png` — 4×7 cells, character order in `src/game/font.ts`.
 
 The map opens in [Tiled](https://www.mapeditor.org/) (`public/assets/maps/norrkoping.json`). Each tile in the tileset

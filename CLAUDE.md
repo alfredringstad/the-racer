@@ -63,6 +63,15 @@ shutdown. Restarting without it fails on duplicate texture keys. `railTiles` red
 (N=1, E=2, S=4, W=8). Tileset tiles carry a `surface` property, and `TrackMap` reads it first (so Tiled edits work)
 and falls back to `surfaceOfTileId`.
 
+## Night mode
+`NightLighting` (src/game/Lighting.ts) keeps two DynamicTextures the size of the screen plus a margin: `lightmap`
+(ambient fill plus ADD-stamped light shapes, drawn MULTIPLY over the world) and `glowmap` (black plus ADD-stamped bulbs,
+drawn ADD). Both are world-anchored at last frame's camera position, because camera follow only settles during
+render. Lights come from `TrackMap.lamps` (the `lights` layer) and `TrackMap.glows` (storefront facades and ~40% of
+upper windows), queried via `PointIndex`. In v4, DynamicTexture draws are buffered: call `render()`.
+Lamp posts are sprites per chunk (`TrackMap.lampSprites`), depth-sorted against the car each frame, and solid via
+a small circle-vs-box test in `Car.collides`.
+
 ## Gameplay conventions
 - Hand-rolled physics, no Arcade/Matter. In `Car.ts` velocity is split into forward and lateral parts, and the lateral
   part decays by `exp(-grip·dt)`. Speeds are px/s (≈ km/h).

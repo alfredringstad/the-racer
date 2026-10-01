@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
-import { surfaceOfTileId, TILE_SIZE, type Surface } from './tiles';
+import { lowerWallId, surfaceOfTileId, TILE_SIZE, upperWallId, type Surface } from './tiles';
+import { PointIndex } from './PointIndex';
 import { SURFACES } from './surfaces';
 
 const SURFACE_LIST = Object.keys(SURFACES) as Surface[];
@@ -38,6 +39,33 @@ export interface TiledMap {
   layers: TiledLayer[];
 }
 
+export interface Lamp {
+  x: number; // foot of the post
+  y: number;
+  seed: number; // 0–1, staggers switch-on time
+}
+
+export interface Glow {
+  x: number;
+  y: number;
+  kind: 'window' | 'shop';
+  seed: number;
+}
+
+/** Collision radius of a lamp post, px. */
+export const LAMP_RADIUS = 1.5;
+
+interface Chunk {
+  map: Phaser.Tilemaps.Tilemap;
+  objects: Phaser.GameObjects.GameObject[];
+  textures: string[];
+}
+
+export interface ChunkExtras {
+  objects: Phaser.GameObjects.GameObject[];
+  textures?: string[];
+}
+
 export const prop = <T>(props: TiledProperty[] | undefined, name: string) =>
   props?.find((p) => p.name === name)?.value as T | undefined;
 
@@ -58,11 +86,15 @@ export class TrackMap {
   private readonly decor: number[];
   private readonly firstgid: number;
   private readonly surfaces: Uint8Array;
-  private readonly chunks = new Map<string, { map: Phaser.Tilemaps.Tilemap; overlay?: Phaser.GameObjects.Image }>();
+  private readonly chunks = new Map<string, Chunk>();
   /** 1 where tram rails cross the tile (set by TramNetwork). */
   railTiles?: Uint8Array;
-  /** Optional extra layer drawn per chunk (e.g. tram rails): returns an image using texture `key`, or nothing. */
-  chunkOverlay?: (key: string, x: number, y: number, w: number, h: number) => Phaser.GameObjects.Image | undefined;
+  /** Extra things built with each chunk (e.g. tram rails). `key` is unique per chunk, for texture names. */
+  readonly chunkDecorators: Array<(key: string, x: number, y: number, w: number, h: number) => ChunkExtras | undefined> = [];
+  readonly lamps: PointIndex<Lamp>;
+  readonly glows: PointIndex<Glow>;
+  /** Lamp sprites that currently exist (in loaded chunks). */
+  readonly lampSprites = new Set<Phaser.GameObjects.Image>();
 
   constructor(
     private readonly scene: Phaser.Scene,
@@ -92,6 +124,29 @@ export class TrackMap {
       if (d && SURFACES[d].solid) s = d;
       this.surfaces[i] = SURFACE_LIST.indexOf(s);
     }
+
+    const lamps = (data.layers.find((l) => l.name === 'lights')?.objects ?? [])
+      .filter((o) => o.type === 'street_lamp')
+      .map((o) => ({ x: o.x, y: o.y, seed: hash01(o.x, o.y) }));
+    this.lamps = new PointIndex(lamps);
+
+    // Night glows: every storefront, and some upper-floor windows.
+    const shopGids = new Set(['restaurant', 'cafe', 'bar', 'shop'].map((f) => lowerWallId(f as 'shop') + this.firstgid));
+    const windowGids = new Set((['residential', 'civic', 'commercial', 'industrial'] as const).map((st) => upperWallId(st) + this.firstgid));
+    const glows: Glow[] = [];
+    for (let i = 0; i < this.ground.length; i++) {
+      const c = i % this.width;
+      const r = Math.floor(i / this.width);
+      const seed = hash01(c, r);
+      if (shopGids.has(this.ground[i])) glows.push({ x: c * TILE_SIZE + 8, y: r * TILE_SIZE + 11, kind: 'shop', seed });
+      else if (windowGids.has(this.ground[i]) && seed < 0.4) glows.push({ x: c * TILE_SIZE + 8, y: r * TILE_SIZE + 9, kind: 'window', seed });
+    }
+    this.glows = new PointIndex(glows);
+  }
+
+  /** Lamp posts close enough to matter for collision at (x, y). */
+  obstaclesNear(x: number, y: number, r = 16): Lamp[] {
+    return this.lamps.query(x - r, y - r, x + r, y + r);
   }
 
   layer(name: string): TiledLayer {
@@ -141,13 +196,13 @@ export class TrackMap {
     for (const [key, chunk] of this.chunks) this.destroyChunk(key, chunk);
   }
 
-  private destroyChunk(key: string, chunk: { map: Phaser.Tilemaps.Tilemap; overlay?: Phaser.GameObjects.Image }) {
+  private destroyChunk(key: string, chunk: Chunk) {
     chunk.map.destroy();
-    if (chunk.overlay) {
-      const tex = chunk.overlay.texture.key;
-      chunk.overlay.destroy();
-      this.scene.textures.remove(tex);
+    for (const o of chunk.objects) {
+      this.lampSprites.delete(o as Phaser.GameObjects.Image);
+      o.destroy();
     }
+    for (const t of chunk.textures) this.scene.textures.remove(t);
     this.chunks.delete(key);
   }
 
@@ -164,7 +219,27 @@ export class TrackMap {
         if (this.ground[i] > 0) ground.putTileAt(this.ground[i], c, r);
         if (this.decor[i] > 0) decor.putTileAt(this.decor[i], c, r);
       }
-    const overlay = this.chunkOverlay?.(`chunk-overlay-${cx}-${cy}`, cx * CHUNK_PX, cy * CHUNK_PX, w * TILE_SIZE, h * TILE_SIZE);
-    this.chunks.set(`${cx},${cy}`, { map, overlay });
+    const chunk: Chunk = { map, objects: [], textures: [] };
+    const [x0, y0] = [cx * CHUNK_PX, cy * CHUNK_PX];
+    for (const lamp of this.lamps.query(x0, y0, x0 + w * TILE_SIZE, y0 + h * TILE_SIZE)) {
+      // Foot of the post (row 21 of the 24px sprite) sits on the map point.
+      const sprite = this.scene.add.image(lamp.x, lamp.y, 'street-lamp').setOrigin(0.5, 21.5 / 24).setDepth(11);
+      this.lampSprites.add(sprite);
+      chunk.objects.push(sprite);
+    }
+    this.chunkDecorators.forEach((decorate, i) => {
+      const extras = decorate(`chunk-${i}-${cx}-${cy}`, x0, y0, w * TILE_SIZE, h * TILE_SIZE);
+      if (extras) {
+        chunk.objects.push(...extras.objects);
+        chunk.textures.push(...(extras.textures ?? []));
+      }
+    });
+    this.chunks.set(`${cx},${cy}`, chunk);
   }
+}
+
+function hash01(x: number, y: number) {
+  let h = (Math.round(x) * 374761393 + Math.round(y) * 668265263) | 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967295;
 }
