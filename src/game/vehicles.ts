@@ -30,7 +30,9 @@ export interface VehicleSpec {
   /** Collision box half-extents in vehicle space (x forward, y right). */
   halfLength: number;
   halfWidth: number;
-  /** Sprite scale; set from VEHICLE_SCALE, leave unset in the specs below. */
+  /** This vehicle's own scale, overriding VEHICLE_SCALE (e.g. to make it true to life). */
+  scale?: number;
+  /** Final sprite scale, filled in by `scaled()`; leave unset in the specs below. */
   spriteScale?: number;
   /** Where skid marks are dropped, [x forward, y right]. */
   skidWheels: ReadonlyArray<[number, number]>;
@@ -99,6 +101,8 @@ export const BIKE: VehicleSpec = {
   id: 'bike',
   name: 'BICYCLE',
   sprite: 'bike',
+  // Real size: the sprite is drawn 15 px long; 15 × 0.83 × 0.140625 m/px ≈ 1.75 m, a typical bicycle.
+  scale: 0.83,
   engine: 150,
   engineFade: 0.75,
   brake: 300,
@@ -163,7 +167,7 @@ export const BUS: VehicleSpec = {
 export const VEHICLE_SCALE = 1.5;
 
 function scaled(v: VehicleSpec): VehicleSpec {
-  const k = VEHICLE_SCALE;
+  const k = v.scale ?? VEHICLE_SCALE;
   return {
     ...v,
     spriteScale: k,
