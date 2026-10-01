@@ -15,6 +15,14 @@ const TAIL_LIGHT = 0xff3a2e;
 const PORT_LIGHT = 0xff3a2e;
 const STARBOARD_LIGHT = 0x3aff7a;
 const STERN_LIGHT = 0xfff4d6;
+const FLOODLIGHT = 0xe8f4ff;
+/** Boat floodlight: one long, narrow beam that swings into turns. */
+const FLOOD_SCALE_X = 1.9;
+const FLOOD_SCALE_Y = 0.8;
+const FLOOD_INTENSITY = 0.75;
+/** Radians of swing per rad/s of turning, and the most it swings either way. */
+const FLOOD_LEAD = 0.35;
+const FLOOD_MAX_SWING = 0.4;
 
 // Brightness knobs. Scales are relative to the light PNGs in public/assets/lights/.
 const LAMP_SCALE = 1.3; // round.png is 128px across → ~166px pool
@@ -45,6 +53,9 @@ export class NightLighting {
   /** 0 = day, 1 = night. */
   night = 0;
   private target = 0;
+  /** Floodlight angle relative to the boat's heading, and last frame's heading to measure turning. */
+  private floodSwing = 0;
+  private lastHeading?: number;
   private readonly lightmap: Phaser.Textures.DynamicTexture;
   private readonly glowmap: Phaser.Textures.DynamicTexture;
   private readonly lightImage: Phaser.GameObjects.Image;
@@ -140,7 +151,7 @@ export class NightLighting {
     const front = car.spec.halfLength - 1;
     const back = -car.spec.halfLength;
     if (car.spec.lights === 'boat') {
-      this.boatLights(stamp, car, c, s, front, back, n);
+      this.boatLights(stamp, car, c, s, front, back, n, dtMs / 1000);
       lm.render();
       gm.render();
       return;
@@ -170,7 +181,7 @@ export class NightLighting {
 
   /**
    * Navigation lanterns: red to port and green to starboard at the bow, a white all-round light
-   * on the stern. No beam, just the lanterns and their shimmer on the water.
+   * on the stern, each with a shimmer on the water. Plus a floodlight that leads into turns.
    */
   private boatLights(
     stamp: (dt: Phaser.Textures.DynamicTexture, key: string, x: number, y: number, tint: number, alpha: number, extra?: Phaser.Types.Textures.StampConfig) => void,
@@ -180,6 +191,7 @@ export class NightLighting {
     front: number,
     back: number,
     n: number,
+    dt: number,
   ) {
     const lm = this.lightmap;
     const gm = this.glowmap;
@@ -194,6 +206,20 @@ export class NightLighting {
       // Reflection spreading out on the water to that side.
       stamp(lm, 'light-small', x - s * side * 6, y + c * side * 6, tint, 0.45 * n * k, { scale: 1.1 });
     }
+    // Floodlight from the windscreen, leading into turns.
+    const turnRate = this.lastHeading === undefined || dt <= 0 ? 0 : Phaser.Math.Angle.Wrap(car.heading - this.lastHeading) / dt;
+    this.lastHeading = car.heading;
+    const swing = Phaser.Math.Clamp(turnRate * FLOOD_LEAD, -FLOOD_MAX_SWING, FLOOD_MAX_SWING);
+    this.floodSwing += (swing - this.floodSwing) * (1 - Math.exp(-4 * dt));
+    stamp(lm, 'light-cone', car.x + c, car.y + s, FLOODLIGHT, FLOOD_INTENSITY * n * k, {
+      originX: 0,
+      originY: 0.5,
+      rotation: car.heading + this.floodSwing,
+      scaleX: FLOOD_SCALE_X,
+      scaleY: FLOOD_SCALE_Y,
+    });
+    stamp(gm, 'light-small', car.x + c, car.y + s, FLOODLIGHT, 0.5 * n * k, { scale: 0.3 });
+
     const sx = car.x + c * (back + 1);
     const sy = car.y + s * (back + 1);
     stamp(gm, 'light-small', sx, sy, STERN_LIGHT, 0.85 * n * k, { scale: 0.45 });
