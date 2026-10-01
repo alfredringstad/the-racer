@@ -72,6 +72,8 @@ export const PALETTE = {
   carBody: 0xe04a4a,
   carDark: 0xa8323a,
   carGlass: 0x9fd3e8,
+  busBody: 0xe8893a, // folkabuss orange
+  busDark: 0xb8682c,
   tyre: 0x2b2a3a,
 
   uiBg: 0x2b2a3a,

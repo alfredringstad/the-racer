@@ -84,6 +84,9 @@ export const EV: VehicleSpec = {
   grip: 0.72,
   handbrakeGrip: 0.2,
   bounce: 0.15,
+  halfLength: 6.5,
+  halfWidth: 4.5,
+  skidWheels: [[-5, -4.5], [-5, 4.5]],
 };
 
 /**
@@ -120,7 +123,37 @@ export const BIKE: VehicleSpec = {
   downTime: 1.2,
 };
 
-export const VEHICLES: readonly VehicleSpec[] = [CAR, EV, BIKE];
+/**
+ * Folkabuss (VW Type 2): long and boxy with a wheezy air-cooled engine. Slow to get going,
+ * low top speed, heavy steering, and a tall soft body that rattles over cobbles.
+ */
+export const BUS: VehicleSpec = {
+  ...CAR,
+  id: 'bus',
+  name: 'FOLKABUSS',
+  sprite: 'bus',
+  engine: 105,
+  engineFade: 0.2,
+  brake: 230,
+  reverseAccel: 70,
+  reverseMax: 40,
+  rolling: 14,
+  turnRate: 2.3,
+  turnFullSpeed: 40,
+  grip: 0.85,
+  handbrakeGrip: 0.3,
+  bounce: 0.25,
+  halfLength: 8.5,
+  halfWidth: 4.5,
+  skidWheels: [[-5, -4.5], [-5, 4.5]],
+  surfaces: {
+    asphalt: { maxSpeed: 145 },
+    cobble: { maxSpeed: 120, rumble: 0.9 },
+    paving: { maxSpeed: 100, rumble: 0.5 },
+  },
+};
+
+export const VEHICLES: readonly VehicleSpec[] = [CAR, EV, BUS, BIKE];
 
 export function vehicleById(id: unknown): VehicleSpec {
   return VEHICLES.find((v) => v.id === id) ?? CAR;

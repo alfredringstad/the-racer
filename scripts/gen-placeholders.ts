@@ -433,12 +433,63 @@ function drawCar(): Img {
   return car({ b: P.carBody, d: P.carDark, y: P.lane }, 'gbbbbgg');
 }
 
-/** Copper-green with a long panoramic glass roof and cool white headlights. */
+/** Copper-green, a size up from the hatchback, with a long panoramic glass roof and cool white headlights. */
 function drawEv(): Img {
-  return car({ b: P.copper, d: P.copperDark, y: P.uiText }, 'ggggggg');
+  const img = new Img(16, 16);
+  const cabin = '.kbdgggggggggbk.';
+  img.pattern(0, 0, [
+    '................',
+    '................',
+    '...tt......tt...',
+    '.kkkkkkkkkkkkkk.',
+    '.kbbbbbbbbbbbyk.',
+    cabin,
+    cabin,
+    cabin,
+    cabin,
+    cabin,
+    cabin,
+    '.kbbbbbbbbbbbyk.',
+    '.kkkkkkkkkkkkkk.',
+    '...tt......tt...',
+    '................',
+    '................',
+  ], { k: P.ink, b: P.copper, d: P.copperDark, g: P.carGlass, y: P.uiText, t: P.tyre });
+  return img;
 }
 
-/** Rider seen from above, facing east: helmet, shoulders, arms to the handlebar, wheels fore and aft. */
+/**
+ * Folkabuss (VW Type 2), facing east: two-tone body, cream roof with skylights, split windscreen
+ * and the white V on the nose. Engine grille at the back. 20x20 since it's longer than the cars.
+ */
+function drawBus(): Img {
+  const img = new Img(20, 20);
+  const roof = '.kdwwwwwwwwwwwwggbk.';
+  img.pattern(0, 0, [
+    '....................',
+    '....................',
+    '....................',
+    '....................',
+    '....tt........tt....',
+    '.kkkkkkkkkkkkkkkkkk.',
+    '.kdbbbbbbbbbbbbbbyk.',
+    '.kdwgwgwgwgwgwwggbk.',
+    roof,
+    '.kdwwwwwwwwwwwwwwwk.',
+    '.kdwwwwwwwwwwwwwwwk.',
+    roof,
+    '.kdwgwgwgwgwgwwggbk.',
+    '.kdbbbbbbbbbbbbbbyk.',
+    '.kkkkkkkkkkkkkkkkkk.',
+    '....tt........tt....',
+    '....................',
+    '....................',
+    '....................',
+    '....................',
+  ], { k: P.ink, b: P.busBody, d: P.busDark, w: P.wall, g: P.carGlass, y: P.lamp, t: P.tyre });
+  return img;
+}
+
 function drawBike(): Img {
   const img = new Img(16, 16);
   img.pattern(0, 0, [
@@ -588,6 +639,7 @@ const outputs: Array<[string, () => Img]> = [
   ['public/assets/sprites/car.png', drawCar],
   ['public/assets/sprites/ev.png', drawEv],
   ['public/assets/sprites/bike.png', drawBike],
+  ['public/assets/sprites/bus.png', drawBus],
   ['public/' + FONT.path, drawFont],
   ['public/assets/sprites/street-lamp.png', drawStreetLamp],
   ['public/assets/lights/round.png', () => drawRoundLight(128)],
