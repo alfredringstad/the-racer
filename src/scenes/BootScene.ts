@@ -10,7 +10,8 @@ export class BootScene extends Phaser.Scene {
     this.load.image('tiles', 'assets/tiles/tiles.png');
     this.load.image('car', 'assets/sprites/car.png');
     this.load.image(FONT.key, FONT.path);
-    this.load.tilemapTiledJSON('norrkoping', 'assets/maps/norrkoping.json');
+    // Parsed by TrackMap itself (chunked rendering), so it's loaded as plain JSON.
+    this.load.json('norrkoping', 'assets/maps/norrkoping.json');
   }
 
   create() {

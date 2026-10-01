@@ -16,7 +16,7 @@ import { overpass, type LatLon, type OsmElement, type OverpassResponse, type Osm
 import { dominantGridAngle, Projection, relationRings, type Vec } from './lib/geo';
 import { fillRings, Grid, samplePolyline, strokeLine } from './lib/raster';
 import { Img } from './lib/png';
-import { E, N, S, T, TILE_COUNT, TILE_SIZE, TILESET_COLUMNS, TILESET_ROWS, W, surfaceOfTileId } from '../src/game/tiles';
+import { DIAG_INDEX, E, N, S, T, TILE_COUNT, TILE_SIZE, TILESET_COLUMNS, TILESET_ROWS, W, lowerWallId, roofId, surfaceOfTileId, tileName, upperWallId } from '../src/game/tiles';
 import { PALETTE } from '../src/game/palette';
 
 // ---------------------------------------------------------------------------
@@ -28,8 +28,8 @@ const CACHE_FILE = resolve(ROOT, 'data/osm-cache.json');
 const MAP_FILE = resolve(ROOT, 'public/assets/maps/norrkoping.json');
 const PREVIEW_FILE = resolve(ROOT, 'data/map-preview.png');
 
-/** Metres per 16px tile. */
-const METRES_PER_TILE = 4.5;
+/** Metres per 16px tile. The car sprite is 16px, so this also sets how big streets feel. */
+const METRES_PER_TILE = 2.25;
 /** Extra space around the four boundary streets, in metres. */
 const MARGIN_M = 30;
 
@@ -42,23 +42,30 @@ const BOUNDARY = {
   north: 'Norra Promenaden',
 };
 
-/** Drivable road width in tiles, by highway=* value. Anything missing isn't rasterized. */
-const ROAD_WIDTH: Record<string, number> = {
-  motorway: 3,
-  trunk: 3,
-  primary: 3,
-  secondary: 3,
-  tertiary: 3,
-  motorway_link: 2,
-  trunk_link: 2,
-  primary_link: 2,
-  secondary_link: 2,
-  tertiary_link: 2,
-  residential: 2,
-  unclassified: 2,
-  living_street: 2,
-  pedestrian: 2,
+/** Drivable road width in metres, by highway=* value (wider than reality). Anything missing isn't rasterized. */
+const ROAD_WIDTH_M: Record<string, number> = {
+  motorway: 11.25,
+  trunk: 11.25,
+  primary: 11.25,
+  secondary: 11.25,
+  tertiary: 11.25,
+  motorway_link: 9,
+  trunk_link: 9,
+  primary_link: 9,
+  secondary_link: 9,
+  tertiary_link: 9,
+  residential: 9,
+  unclassified: 9,
+  living_street: 9,
+  pedestrian: 9,
 };
+const ROAD_WIDTH: Record<string, number> = Object.fromEntries(
+  Object.entries(ROAD_WIDTH_M).map(([k, m]) => [k, Math.max(2, Math.round(m / METRES_PER_TILE))]),
+);
+/** Main roads (spawn candidates) are at least this many tiles wide. */
+const MAIN_ROAD_TILES = ROAD_WIDTH.secondary;
+/** Spacing of trees along natural=tree_row, in metres. */
+const TREE_ROW_SPACING_M = 7;
 
 const COBBLE_SURFACES = new Set(['sett', 'cobblestone', 'unhewn_cobblestone', 'paving_stones', 'stone', 'cobblestone:flattened']);
 const GREEN = {
@@ -155,6 +162,8 @@ async function loadData(refresh: boolean): Promise<Cache> {
 // ---------------------------------------------------------------------------
 
 type Ground = 'paving' | 'grass' | 'water' | 'building' | 'asphalt' | 'cobble';
+type TreePart = 'small' | 'TL' | 'TR' | 'BL' | 'BR';
+const TREE_TILE: Record<TreePart, number> = { small: T.TREE_SMALL, TL: T.TREE_TL, TR: T.TREE_TR, BL: T.TREE_BL, BR: T.TREE_BR };
 const isRoad = (g: Ground | undefined) => g === 'asphalt' || g === 'cobble';
 
 function buildMap(cache: Cache) {
@@ -204,7 +213,7 @@ function buildMap(cache: Cache) {
   const tileToLatLon = (c: number, r: number) => proj.unproject([minU + c * METRES_PER_TILE, maxV - r * METRES_PER_TILE]);
 
   const ground = new Grid<Ground>(cols, rows, 'paving');
-  const trees = new Grid<boolean>(cols, rows, false);
+  const trees = new Grid<TreePart | undefined>(cols, rows, undefined);
   /** Tiles stroked from a main road way (not parking lots or squares) — spawn candidates. */
   const mainRoad = new Grid<boolean>(cols, rows, false);
 
@@ -260,27 +269,40 @@ function buildMap(cache: Cache) {
     const width = ROAD_WIDTH[t.highway];
     strokeLine(ground, w.geometry.map(toTile), width, (c, r) => {
       ground.set(c, r, kind);
-      if (width >= 3 && kind === 'asphalt') mainRoad.set(c, r, true);
+      if (width >= MAIN_ROAD_TILES && kind === 'asphalt') mainRoad.set(c, r, true);
     });
   }
 
   // Trees: mapped single trees and tree rows, only on open (non-road) ground.
-  const plant = ([x, y]: Vec) => {
-    const c = Math.floor(x);
-    const r = Math.floor(y);
+  // Big 2×2 trees where there's room, a small one otherwise.
+  const open = (c: number, r: number) => {
     const g = ground.get(c, r);
-    if (g === 'grass' || g === 'paving') trees.set(c, r, true);
+    return (g === 'grass' || g === 'paving') && !trees.get(c, r);
+  };
+  const plant = ([x, y]: Vec) => {
+    // The 2×2 tree is centred on the tile corner nearest the point.
+    const c = Math.round(x) - 1;
+    const r = Math.round(y) - 1;
+    if (open(c, r) && open(c + 1, r) && open(c, r + 1) && open(c + 1, r + 1)) {
+      trees.set(c, r, 'TL');
+      trees.set(c + 1, r, 'TR');
+      trees.set(c, r + 1, 'BL');
+      trees.set(c + 1, r + 1, 'BR');
+    } else if (open(Math.floor(x), Math.floor(y))) trees.set(Math.floor(x), Math.floor(y), 'small');
   };
   for (const el of els) {
     if (el.type === 'node' && tag(el, 'natural') === 'tree') plant(toTile(el));
-    if (el.type === 'way' && tag(el, 'natural') === 'tree_row') samplePolyline(el.geometry.map(toTile), 2).forEach(plant);
+    if (el.type === 'way' && tag(el, 'natural') === 'tree_row')
+      samplePolyline(el.geometry.map(toTile), TREE_ROW_SPACING_M / METRES_PER_TILE).forEach(plant);
   }
   // Sprinkle a few extra trees into parks so lawns don't look bare.
-  for (let r = 1; r < rows - 1; r++)
-    for (let c = 1; c < cols - 1; c++) {
-      if (ground.get(c, r) !== 'grass' || hash(c, r, 3) > 0.06) continue;
-      const allGrass = [[0, -1], [1, 0], [0, 1], [-1, 0]].every(([dc, dr]) => ground.get(c + dc, r + dr) === 'grass');
-      if (allGrass) trees.set(c, r, true);
+  for (let r = 2; r < rows - 2; r++)
+    for (let c = 2; c < cols - 2; c++) {
+      if (hash(c, r, 3) > 0.012) continue;
+      let lawn = true;
+      for (let dr = -1; dr <= 2 && lawn; dr++)
+        for (let dc = -1; dc <= 2 && lawn; dc++) lawn = ground.get(c + dc, r + dr) === 'grass' && !trees.get(c + dc, r + dr);
+      if (lawn) plant([c + 1, r + 1]);
     }
 
   // 3. Autotile → tileset ids.
@@ -295,13 +317,23 @@ function buildMap(cache: Cache) {
         // Off-map counts as road so streets run off the edge without a curb.
         const road = (dc: number, dr: number) => !ground.inBounds(c + dc, r + dr) || isRoad(ground.get(c + dc, r + dr));
         const mask = (road(0, -1) ? N : 0) | (road(1, 0) ? E : 0) | (road(0, 1) ? S : 0) | (road(-1, 0) ? W : 0);
-        id = (g === 'asphalt' ? T.ROAD_ASPHALT : T.ROAD_COBBLE) + mask;
-      } else if (g === 'building') id = ground.get(c, r + 1) === 'building' ? T.ROOF : T.WALL;
+        const diag = DIAG_INDEX[mask];
+        id =
+          diag !== undefined
+            ? (g === 'asphalt' ? T.ROAD_ASPHALT_DIAG : T.ROAD_COBBLE_DIAG) + diag
+            : (g === 'asphalt' ? T.ROAD_ASPHALT : T.ROAD_COBBLE) + mask;
+      } else if (g === 'building') {
+        // 3/4 view: the two southernmost rows of a building are its facade.
+        if (ground.get(c, r + 1) !== 'building') id = lowerWallId('residential');
+        else if (ground.get(c, r + 2) !== 'building') id = upperWallId('residential');
+        else id = roofId('residential');
+      }
       else if (g === 'water') id = ground.get(c, r - 1) === 'water' || r === 0 ? T.WATER : T.WATER_SHORE;
       else if (g === 'grass') id = hash(c, r, 1) < 0.08 ? T.GRASS_FLOWERS : T.GRASS;
       else id = T.PAVING;
       groundIds[i] = id;
-      if (trees.get(c, r)) decorIds[i] = T.TREE;
+      const tree = trees.get(c, r);
+      if (tree) decorIds[i] = TREE_TILE[tree];
     }
 
   // 4. Spawn: on a straight stretch of main road, as close to the centre as possible.
@@ -318,7 +350,7 @@ function findSpawn(ground: Grid<Ground>, mainRoad: Grid<boolean>, cols: number, 
   const road = (c: number, r: number) => isRoad(ground.get(c, r));
   const run = (c: number, r: number, dc: number, dr: number) => {
     let n = 0;
-    while (n < 20 && road(c + dc * (n + 1), r + dr * (n + 1))) n++;
+    while (n < 30 && road(c + dc * (n + 1), r + dr * (n + 1))) n++;
     return n;
   };
   let best: { c: number; r: number; d: number; heading: number } | undefined;
@@ -327,8 +359,9 @@ function findSpawn(ground: Grid<Ground>, mainRoad: Grid<boolean>, cols: number, 
       if (!mainRoad.get(c, r)) continue;
       // Middle of the carriageway: road on both sides, and a long straight run along one axis.
       const [e, w, s, n] = [run(c, r, 1, 0), run(c, r, -1, 0), run(c, r, 0, 1), run(c, r, 0, -1)];
-      const horizontal = e >= 8 && w >= 8 && n >= 1 && s >= 1 && n + s <= 3;
-      const vertical = n >= 8 && s >= 8 && e >= 1 && w >= 1 && e + w <= 3;
+      const half = Math.floor(MAIN_ROAD_TILES / 2);
+      const horizontal = e >= 16 && w >= 16 && n >= half && s >= half && n + s < MAIN_ROAD_TILES;
+      const vertical = n >= 16 && s >= 16 && e >= half && w >= half && e + w < MAIN_ROAD_TILES;
       if (!horizontal && !vertical) continue;
       const d = Math.hypot(c - cols / 2, r - rows / 2);
       if (!best || d < best.d) best = { c, r, d, heading: horizontal ? 0 : -90 };
@@ -352,7 +385,11 @@ function toTiled(m: ReturnType<typeof buildMap>, cache: Cache) {
   const tiles = [];
   for (let id = 0; id < TILE_COUNT; id++) {
     const surface = surfaceOfTileId(id);
-    if (surface) tiles.push({ id, properties: [{ name: 'surface', type: 'string', value: surface }] });
+    const name = tileName(id);
+    const properties = [];
+    if (name) properties.push({ name: 'name', type: 'string', value: name });
+    if (surface) properties.push({ name: 'surface', type: 'string', value: surface });
+    if (properties.length) tiles.push({ id, properties });
   }
   const layer = (id: number, name: string, data: number[]) => ({
     id,

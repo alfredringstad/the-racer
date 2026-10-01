@@ -7,7 +7,7 @@ export const FONT = {
   cellWidth: 4,
   cellHeight: 7,
   charsPerRow: 16,
-  chars: "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 .,:!?-/()'%+=<>ÅÄÖ",
+  chars: "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 .,:!?-/()'%+=<>ÅÄÖ&",
 } as const;
 
 // 5-row glyphs (or 7-row for letters with diacritics). '#' = ink.
@@ -67,11 +67,17 @@ export const GLYPHS: Record<string, string[]> = {
   Å: ['.#.', '...', '.#.', '#.#', '###', '#.#', '#.#'],
   Ä: ['#.#', '...', '.#.', '#.#', '###', '#.#', '#.#'],
   Ö: ['#.#', '...', '.#.', '#.#', '#.#', '#.#', '.#.'],
+  '&': ['.#.', '#.#', '.#.', '#.#', '.##'],
 };
 
-/** Upper-cases and strips characters the font can't draw. */
+/** Upper-cases, folds accents the font lacks (É → E, Ü → U) and blanks anything else it can't draw. */
 export function fontSafe(text: string): string {
   return [...text.toUpperCase()]
-    .map((c) => (c === '\n' || FONT.chars.includes(c) ? c : c === 'É' ? 'E' : c === '©' ? '(C)' : ' '))
+    .map((c) => {
+      if (c === '\n' || FONT.chars.includes(c)) return c;
+      if (c === '©') return '(C)';
+      const base = c.normalize('NFD')[0];
+      return FONT.chars.includes(base) ? base : ' ';
+    })
     .join('');
 }

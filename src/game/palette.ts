@@ -37,6 +37,31 @@ export const PALETTE = {
   wallDark: 0xd2c3a3,
   window: 0x4a6a8a,
 
+  // building styles
+  copper: 0x6fb59a, // church roofs (oxidised copper)
+  copperDark: 0x4f8f7a,
+  copperLight: 0x9ed4bd,
+  slate: 0x7c8aa5, // civic roofs
+  slateDark: 0x5d6a84,
+  slateLight: 0x9eabc4,
+  tin: 0x9a8f86, // industrial roofs
+  tinDark: 0x7a6f68,
+  tinLight: 0xb7ada3,
+  flat: 0xc9c6c0, // commercial flat roofs
+  flatDark: 0xaaa7a1,
+  stone: 0xc4beb2,
+  stoneDark: 0x948e84,
+  brick: 0xa5523f,
+  brickDark: 0x7f3c2f,
+  wood: 0x6b4a33,
+  woodDark: 0x4e3524,
+  gold: 0xf2c14e,
+  stained: 0xb86fb0,
+  awningRed: 0xd9534f,
+  awningGreen: 0x5f9e6e,
+  awningBlue: 0x4f7fbf,
+  lamp: 0xffe9a8,
+
   carBody: 0xe04a4a,
   carDark: 0xa8323a,
   carGlass: 0x9fd3e8,

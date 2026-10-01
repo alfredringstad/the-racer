@@ -3,11 +3,11 @@ import type { DriveInput } from './input';
 import { SURFACES, type SurfaceParams } from './surfaces';
 import type { TrackMap } from './TrackMap';
 
-// Tuning (px, seconds). 1 px/s ≈ 1 km/h.
-const ENGINE = 120; // px/s² at accel multiplier 1
-const BRAKE = 260;
-const REVERSE_ACCEL = 70;
-const REVERSE_MAX = 35;
+// Tuning (px, seconds).
+const ENGINE = 165; // px/s² at accel multiplier 1
+const BRAKE = 340;
+const REVERSE_ACCEL = 90;
+const REVERSE_MAX = 50;
 const ROLLING = 12; // px/s² coasting deceleration
 const TURN_RATE = 3.0; // rad/s at full steer
 const TURN_FULL_SPEED = 35; // px/s at which steering reaches full authority
@@ -88,7 +88,7 @@ export class Car {
     this.slip = vL;
 
     // Steering: needs some speed, slightly less authority at top speed, reversed when backing up.
-    const authority = Math.min(1, Math.abs(vF) / TURN_FULL_SPEED) * (1 - 0.3 * Math.min(1, Math.abs(vF) / 130));
+    const authority = Math.min(1, Math.abs(vF) / TURN_FULL_SPEED) * (1 - 0.3 * Math.min(1, Math.abs(vF) / 190));
     const turn = input.steer * TURN_RATE * authority * Math.sign(vF) * (input.handbrake ? 1.35 : 1) * dt;
     if (turn !== 0 && !this.collides(this.x, this.y, this.heading + turn)) this.heading += turn;
 

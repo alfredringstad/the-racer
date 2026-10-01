@@ -1,10 +1,10 @@
 import Phaser from 'phaser';
 import { Car } from '../game/Car';
 import { Controls } from '../game/input';
-import { TrackMap } from '../game/TrackMap';
+import { TrackMap, type TiledMap } from '../game/TrackMap';
 import { FONT, fontSafe } from '../game/font';
 import { PALETTE } from '../game/palette';
-import { PX_PER_S_TO_KMH } from '../game/surfaces';
+import { TILE_SIZE } from '../game/tiles';
 
 const SKID_POOL = 600;
 const SKID_SLIP = 22; // px/s of sideways speed before tyres leave marks
@@ -25,7 +25,7 @@ export class RaceScene extends Phaser.Scene {
   }
 
   create() {
-    this.track = new TrackMap(this, 'norrkoping');
+    this.track = new TrackMap(this, this.cache.json.get('norrkoping') as TiledMap);
     const spawn = this.track.spawn();
     this.car = new Car(this, this.track, spawn.x, spawn.y, spawn.heading);
     this.controls = new Controls(this);
@@ -37,6 +37,8 @@ export class RaceScene extends Phaser.Scene {
     cam.setBounds(0, 0, this.track.widthPx, this.track.heightPx);
     cam.setRoundPixels(true);
     cam.startFollow(this.car, true, 0.12, 0.12);
+    cam.centerOn(spawn.x, spawn.y);
+    this.track.updateChunks(cam.worldView);
     cam.setBackgroundColor(PALETTE.ink);
 
     this.createHud();
@@ -72,6 +74,7 @@ export class RaceScene extends Phaser.Scene {
     const car = this.car;
     const input = this.controls.read();
     car.update(input, delta, time);
+    this.track.updateChunks(this.cameras.main.worldView);
 
     // Camera leads the car a little in the direction of travel.
     const k = 1 - Math.exp(-delta / 250);
@@ -82,7 +85,8 @@ export class RaceScene extends Phaser.Scene {
 
     if (Math.abs(car.slip) > SKID_SLIP || (input.handbrake && car.speed > 30)) this.dropSkids();
 
-    this.hudSpeed.setText(String(Math.round(Math.abs(car.forwardSpeed) * PX_PER_S_TO_KMH)).padStart(3, '0') + ' KM/H');
+    const kmh = Math.abs(car.forwardSpeed) * (this.track.metresPerTile / TILE_SIZE) * 3.6;
+    this.hudSpeed.setText(String(Math.round(kmh)).padStart(3, '0') + ' KM/H');
     this.hudSurface.setText(car.surface.label);
   }
 

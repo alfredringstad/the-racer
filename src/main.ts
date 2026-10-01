@@ -4,9 +4,9 @@ import { RaceScene } from './scenes/RaceScene';
 import { CreditsScene } from './scenes/CreditsScene';
 import { PALETTE, hex } from './game/palette';
 
-// Game Boy is 160×144; we go a bit wider for more look-ahead while driving.
-export const GAME_WIDTH = 192;
-export const GAME_HEIGHT = 144;
+// 2× a slightly-wider-than-Game-Boy 192×144, scaled up by whole multiples.
+export const GAME_WIDTH = 384;
+export const GAME_HEIGHT = 288;
 
 const game = new Phaser.Game({
   type: Phaser.WEBGL,
