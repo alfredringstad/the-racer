@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import type { DriveInput } from './input';
 import type { SurfaceParams } from './surfaces';
 import { LAMP_RADIUS, type TrackMap } from './TrackMap';
+import { TILE_SIZE } from './tiles';
 import { surfacesFor, type VehicleSpec, type VehicleSurfaces } from './vehicles';
 
 const SPRITE_ANGLE_STEPS = 32; // sprite rotation snaps to this many directions for a crisp retro look
@@ -13,6 +14,10 @@ export class Car {
   vx = 0;
   vy = 0;
   surface: SurfaceParams;
+  private swayPhase = 0;
+  private balancePhase = 0;
+  private swayAmp = 0;
+  private swayOffset = 0;
   /** Lateral speed this frame (px/s), for skid marks/HUD. */
   slip = 0;
   /** Impact speed of a collision this frame, 0 if none. */
@@ -132,7 +137,20 @@ export class Car {
       }
     }
 
+    if (v.sway) this.updateSway(v.sway, input.throttle, dt);
     this.syncSprite(time);
+  }
+
+  /** Bike sway: rhythmic while pedalling (tied to distance, so cadence follows speed), a slow balance wobble when crawling. */
+  private updateSway(sway: { amplitude: number; cycleM: number }, pedalling: boolean, dt: number) {
+    const speed = Math.abs(this.forwardSpeed);
+    const metres = (speed * dt * this.map.metresPerTile) / TILE_SIZE;
+    this.swayPhase += (metres / sway.cycleM) * Math.PI * 2;
+    this.balancePhase += dt * Math.PI * 2 * 0.8;
+    const target = pedalling && this.down <= 0 ? 1 : 0.15;
+    this.swayAmp += (target - this.swayAmp) * Math.min(1, dt * 4);
+    const crawl = speed > 3 ? Math.max(0, 1 - speed / 45) : 0; // foot down when stopped
+    this.swayOffset = sway.amplitude * (this.swayAmp * Math.sin(this.swayPhase) + crawl * 0.9 * Math.sin(this.balancePhase));
   }
 
   private fall(reason: string) {
@@ -163,7 +181,10 @@ export class Car {
     const amp = this.surface.rumble * Math.min(1, this.speed / 60);
     const jx = amp ? Math.round(Math.sin(time * 0.07) * amp) : 0;
     const jy = amp ? Math.round(Math.cos(time * 0.091) * amp) : 0;
-    this.sprite.setPosition(this.x + jx, this.y + jy).setRotation(angle);
+    // Sway is sideways to the direction of travel; the shadow stays put, which reads as leaning.
+    const sx = -Math.sin(this.heading) * this.swayOffset;
+    const sy = Math.cos(this.heading) * this.swayOffset;
+    this.sprite.setPosition(Math.round(this.x + jx + sx), Math.round(this.y + jy + sy)).setRotation(angle);
     this.shadow.setPosition(this.x + 1, this.y + 2).setRotation(angle);
   }
 }

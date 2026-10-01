@@ -30,6 +30,11 @@ export interface VehicleSpec {
   /** Collision box half-extents in vehicle space (x forward, y right). */
   halfLength: number;
   halfWidth: number;
+  /**
+   * Visual side-to-side sway (bikes): rocks while pedalling, once per `cycleM` metres travelled,
+   * plus a slow balance wobble at walking pace. `amplitude` is in sprite pixels (scaled like the sprite).
+   */
+  sway?: { amplitude: number; cycleM: number };
   /** This vehicle's own scale, overriding VEHICLE_SCALE (e.g. to make it true to life). */
   scale?: number;
   /** Final sprite scale, filled in by `scaled()`; leave unset in the specs below. */
@@ -104,6 +109,7 @@ export const BIKE: VehicleSpec = {
   // A touch over real size for readability: the sprite is drawn 15 px long;
   // 15 × 1.0 × 0.140625 m/px ≈ 2.1 m (a real bicycle is ~1.75 m).
   scale: 1.0,
+  sway: { amplitude: 1.2, cycleM: 4.6 }, // ~90 rpm at 25 km/h = one sway per crank revolution
   engine: 150,
   engineFade: 0.75,
   brake: 300,
@@ -175,6 +181,7 @@ function scaled(v: VehicleSpec): VehicleSpec {
     halfLength: v.halfLength * k,
     halfWidth: v.halfWidth * k,
     skidWheels: v.skidWheels.map(([x, y]) => [x * k, y * k] as [number, number]),
+    sway: v.sway && { ...v.sway, amplitude: v.sway.amplitude * k },
   };
 }
 
