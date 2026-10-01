@@ -12,11 +12,12 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { overpass, type LatLon, type OsmElement, type OverpassResponse, type OsmWay } from './lib/overpass';
+import { overpass, type LatLon, type OsmElement, type OsmNode, type OverpassResponse, type OsmWay } from './lib/overpass';
+import { buildingStyle, hasOutdoorSeating, POI_QUERY, poiFacade } from './lib/buildings';
 import { dominantGridAngle, Projection, relationRings, type Vec } from './lib/geo';
 import { fillRings, Grid, samplePolyline, strokeLine } from './lib/raster';
 import { Img } from './lib/png';
-import { DIAG_INDEX, E, N, S, T, TILE_COUNT, TILE_SIZE, TILESET_COLUMNS, TILESET_ROWS, W, lowerWallId, roofId, surfaceOfTileId, tileName, upperWallId } from '../src/game/tiles';
+import { DIAG_INDEX, E, N, S, T, TILE_COUNT, TILE_SIZE, TILESET_COLUMNS, TILESET_ROWS, W, lowerWallId, roofId, surfaceOfTileId, tileName, upperWallId, BUILDING_STYLES, FACADES, type BuildingStyle, type Facade } from '../src/game/tiles';
 import { PALETTE } from '../src/game/palette';
 
 // ---------------------------------------------------------------------------
@@ -64,13 +65,17 @@ const ROAD_WIDTH: Record<string, number> = Object.fromEntries(
 );
 /** Main roads (spawn candidates) are at least this many tiles wide. */
 const MAIN_ROAD_TILES = ROAD_WIDTH.secondary;
+/** How far (metres) from a shop/restaurant node we look for a visible facade to put its storefront on. */
+const STOREFRONT_SEARCH_M = 18;
+/** Storefronts span this many facade tiles (centre ± this). */
+const STOREFRONT_HALF_TILES = 1;
 /** Spacing of trees along natural=tree_row, in metres. */
 const TREE_ROW_SPACING_M = 7;
 
 const COBBLE_SURFACES = new Set(['sett', 'cobblestone', 'unhewn_cobblestone', 'paving_stones', 'stone', 'cobblestone:flattened']);
 const GREEN = {
   leisure: new Set(['park', 'garden', 'playground', 'pitch', 'dog_park']),
-  landuse: new Set(['grass', 'meadow', 'recreation_ground', 'village_green', 'cemetery', 'forest', 'flowerbed']),
+  landuse: new Set(['grass', 'meadow', 'recreation_ground', 'village_green', 'cemetery', 'forest', 'flowerbed', 'religious']),
   natural: new Set(['wood', 'scrub', 'grassland', 'heath']),
 };
 
@@ -106,7 +111,7 @@ function featuresQuery(b: Cache['featuresBbox']) {
   way["natural"~"^(wood|scrub|grassland|heath|tree_row)$"];
   way["amenity"="parking"];
   way["place"="square"];
-  node["natural"="tree"];
+  node["natural"="tree"];${POI_QUERY}
 );
 out geom;`;
 }
@@ -258,8 +263,35 @@ function buildMap(cache: Cache) {
     if (tag(el, 'place') === 'square' || (tag(el, 'highway') === 'pedestrian' && tag(el, 'area') === 'yes'))
       fillArea(el, COBBLE_SURFACES.has(tag(el, 'surface') ?? 'sett') ? 'cobble' : 'asphalt');
   }
-  for (const el of els)
-    if (tag(el, 'building') && !['roof', 'carport'].includes(tag(el, 'building')!) && !underground(el)) fillArea(el, 'building');
+  // Buildings: remember which building owns each tile so styles apply per building.
+  const buildingAt = new Grid<number>(cols, rows, -1);
+  const buildings: { el: OsmElement; style: BuildingStyle; cells: Vec[] }[] = [];
+  for (const el of els) {
+    if (!tag(el, 'building') || ['roof', 'carport'].includes(tag(el, 'building')!) || underground(el)) continue;
+    const rings = ringsOf(el);
+    if (!rings.length) continue;
+    const b = { el, style: 'residential' as BuildingStyle, cells: [] as Vec[] };
+    fillRings(ground, rings, (c, r) => {
+      ground.set(c, r, 'building');
+      buildingAt.set(c, r, buildings.length);
+      b.cells.push([c, r]);
+    });
+    buildings.push(b);
+  }
+  // Points of interest: nodes, plus buildings that are themselves tagged as a shop/restaurant.
+  const pois: { tags: Record<string, string>; at: Vec }[] = els
+    .filter((e): e is OsmNode => e.type === 'node' && !!(e.tags?.amenity || e.tags?.shop))
+    .map((n) => ({ tags: n.tags!, at: toTile(n) }));
+  const worship = new Set<number>();
+  for (const p of pois) if (p.tags.amenity === 'place_of_worship') worship.add(buildingAt.get(Math.floor(p.at[0]), Math.floor(p.at[1])) ?? -1);
+  buildings.forEach((b, id) => {
+    b.style = buildingStyle(b.el.tags, worship.has(id));
+    if (b.cells.length && poiFacade(b.el.tags)) {
+      const cx = b.cells.reduce((a, [c]) => a + c, 0) / b.cells.length;
+      const cy = b.cells.reduce((a, [, r]) => a + r, 0) / b.cells.length;
+      pois.push({ tags: b.el.tags!, at: [cx + 0.5, cy + 0.5] });
+    }
+  });
 
   // Roads: wide first, so narrower streets that share tiles keep their own surface.
   const roads = els
@@ -312,6 +344,67 @@ function buildMap(cache: Cache) {
       if (lawn) plant([c + 1, r + 1]);
     }
 
+  // Storefronts: each shop/restaurant gets an awning on the nearest street-level facade we can see
+  // (south-facing, 3/4 view). If there isn't one nearby, food & drink places get outdoor tables instead.
+  const facadeAt = new Grid<Facade | undefined>(cols, rows, undefined);
+  const extraDecor = new Grid<number | undefined>(cols, rows, undefined);
+  const isStreetFacade = (c: number, r: number) => ground.get(c, r) === 'building' && ground.get(c, r + 1) !== 'building' && r + 1 < rows;
+  const searchTiles = Math.round(STOREFRONT_SEARCH_M / METRES_PER_TILE);
+  let storefronts = 0;
+  let tables = 0;
+  for (const poi of pois) {
+    const facade = poiFacade(poi.tags);
+    if (!facade) continue;
+    const pc = Math.floor(poi.at[0]);
+    const pr = Math.floor(poi.at[1]);
+    const home = ground.get(pc, pr) === 'building' ? buildingAt.get(pc, pr) : -1;
+    let best: { c: number; r: number; score: number } | undefined;
+    for (let dr = -searchTiles; dr <= searchTiles; dr++)
+      for (let dc = -searchTiles; dc <= searchTiles; dc++) {
+        const c = pc + dc;
+        const r = pr + dr;
+        if (!isStreetFacade(c, r) || facadeAt.get(c, r)) continue;
+        const score = Math.hypot(dc, dr) + (buildingAt.get(c, r) === home ? 0 : 4);
+        if (score <= searchTiles && (!best || score < best.score)) best = { c, r, score };
+      }
+    if (best) {
+      const owner = buildingAt.get(best.c, best.r);
+      for (let dc = -STOREFRONT_HALF_TILES; dc <= STOREFRONT_HALF_TILES; dc++) {
+        const c = best.c + dc;
+        if (isStreetFacade(c, best.r) && buildingAt.get(c, best.r) === owner && !facadeAt.get(c, best.r)) facadeAt.set(c, best.r, facade);
+      }
+      storefronts++;
+    } else if (hasOutdoorSeating(facade)) {
+      let spot: Vec | undefined;
+      for (let d = 0; d <= 4 && !spot; d++)
+        for (let dr = -d; dr <= d && !spot; dr++)
+          for (let dc = -d; dc <= d && !spot; dc++)
+            if (ground.get(pc + dc, pr + dr) === 'paving' && !trees.get(pc + dc, pr + dr) && !extraDecor.get(pc + dc, pr + dr)) spot = [pc + dc, pr + dr];
+      if (spot) {
+        extraDecor.set(spot[0], spot[1], T.CAFE_TABLES);
+        tables++;
+      }
+    }
+  }
+  // Steeples: on the roof tile nearest each church's centre.
+  let churches = 0;
+  buildings.forEach((b, id) => {
+    if (b.style !== 'church' || !b.cells.length) return;
+    const cx = b.cells.reduce((a, [c]) => a + c, 0) / b.cells.length;
+    const cy = b.cells.reduce((a, [, r]) => a + r, 0) / b.cells.length;
+    const roof = b.cells
+      .filter(([c, r]) => buildingAt.get(c, r) === id && ground.get(c, r) === 'building' && ground.get(c, r + 2) === 'building')
+      .sort((a, z) => Math.hypot(a[0] - cx, a[1] - cy) - Math.hypot(z[0] - cx, z[1] - cy))[0];
+    if (roof) {
+      extraDecor.set(roof[0], roof[1], T.STEEPLE);
+      churches++;
+    }
+  });
+  const styleCounts: Record<string, number> = {};
+  for (const b of buildings) styleCounts[b.style] = (styleCounts[b.style] ?? 0) + 1;
+  console.log('Buildings:', Object.entries(styleCounts).map(([k, v]) => `${k} ${v}`).join(', '));
+  console.log(`Storefronts: ${storefronts}, outdoor seating: ${tables}, steeples: ${churches}`);
+
   // 3. Autotile → tileset ids.
   const groundIds = new Array<number>(cols * rows);
   const decorIds = new Array<number>(cols * rows).fill(-1);
@@ -331,9 +424,10 @@ function buildMap(cache: Cache) {
             : (g === 'asphalt' ? T.ROAD_ASPHALT : T.ROAD_COBBLE) + mask;
       } else if (g === 'building') {
         // 3/4 view: the two southernmost rows of a building are its facade.
-        if (ground.get(c, r + 1) !== 'building') id = lowerWallId('residential');
-        else if (ground.get(c, r + 2) !== 'building') id = upperWallId('residential');
-        else id = roofId('residential');
+        const style = buildings[buildingAt.get(c, r)!]?.style ?? 'residential';
+        if (ground.get(c, r + 1) !== 'building') id = lowerWallId(facadeAt.get(c, r) ?? style);
+        else if (ground.get(c, r + 2) !== 'building') id = upperWallId(style);
+        else id = roofId(style);
       }
       else if (g === 'water') id = ground.get(c, r - 1) === 'water' || r === 0 ? T.WATER : T.WATER_SHORE;
       else if (g === 'grass') id = hash(c, r, 1) < 0.08 ? T.GRASS_FLOWERS : T.GRASS;
@@ -341,6 +435,7 @@ function buildMap(cache: Cache) {
       groundIds[i] = id;
       const tree = trees.get(c, r);
       if (tree) decorIds[i] = TREE_TILE[tree];
+      else if (extraDecor.get(c, r) !== undefined) decorIds[i] = extraDecor.get(c, r)!;
     }
 
   // 4. Spawn: on a straight stretch of main road, as close to the centre as possible.
@@ -531,18 +626,38 @@ function toTiled(m: ReturnType<typeof buildMap>, cache: Cache) {
   };
 }
 
+/** One pixel per tile, coloured by what's drawn there — a quick sanity check of the whole map. */
 function preview(m: ReturnType<typeof buildMap>): Img {
-  const colour: Record<Ground, number> = {
-    paving: PALETTE.paving,
-    grass: PALETTE.grass,
-    water: PALETTE.water,
-    building: PALETTE.roof,
-    asphalt: PALETTE.asphalt,
-    cobble: PALETTE.cobble,
+  const roofColour: Record<BuildingStyle, number> = {
+    residential: PALETTE.roof,
+    church: PALETTE.copper,
+    civic: PALETTE.slate,
+    industrial: PALETTE.tin,
+    commercial: PALETTE.flat,
+  };
+  const storefront: Partial<Record<Facade, number>> = {
+    restaurant: PALETTE.awningRed,
+    cafe: PALETTE.awningGreen,
+    bar: PALETTE.woodDark,
+    shop: PALETTE.awningBlue,
+  };
+  const colourOf = (id: number): number => {
+    if (id >= T.ROOF && id < T.ROOF + BUILDING_STYLES.length) return roofColour[BUILDING_STYLES[id - T.ROOF]];
+    if (id >= T.WALL_UPPER && id < T.WALL_UPPER + BUILDING_STYLES.length) return roofColour[BUILDING_STYLES[id - T.WALL_UPPER]];
+    if (id >= T.WALL_LOWER && id < T.WALL_LOWER + FACADES.length) {
+      const f = FACADES[id - T.WALL_LOWER];
+      return storefront[f] ?? roofColour[f as BuildingStyle];
+    }
+    const s = surfaceOfTileId(id);
+    return s === 'asphalt' ? PALETTE.asphalt : s === 'cobble' ? PALETTE.cobble : s === 'grass' ? PALETTE.grass : s === 'water' ? PALETTE.water : PALETTE.paving;
   };
   const img = new Img(m.cols, m.rows);
-  for (let r = 0; r < m.rows; r++)
-    for (let c = 0; c < m.cols; c++) img.set(c, r, m.trees.get(c, r) ? PALETTE.tree : colour[m.ground.get(c, r)!]);
+  for (let i = 0; i < m.cols * m.rows; i++) {
+    const d = m.decorIds[i];
+    const colour =
+      d === T.STEEPLE ? PALETTE.gold : d === T.CAFE_TABLES ? PALETTE.awningRed : d >= 0 ? PALETTE.tree : colourOf(m.groundIds[i]);
+    img.set(i % m.cols, Math.floor(i / m.cols), colour);
+  }
   return img;
 }
 
