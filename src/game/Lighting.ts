@@ -4,7 +4,7 @@ import type { TrackMap } from './TrackMap';
 
 // Colours of the night. The light map is multiplied over the world: white = untouched,
 // AMBIENT = full night. Lights are added on top of the ambient before multiplying.
-const AMBIENT = 0x262c50;
+const AMBIENT = 0x3a4374;
 const LAMP_LIGHT = 0xffd9a0;
 const LAMP_GLOW = 0xffc870;
 const SHOP_LIGHT = 0xffcf8a;
@@ -12,10 +12,18 @@ const WINDOW_LIGHT = 0xffe0a8;
 const HEADLIGHT = 0xfff4d6;
 const TAIL_LIGHT = 0xff3a2e;
 
+// Brightness knobs. Scales are relative to the light PNGs in public/assets/lights/.
+const LAMP_SCALE = 1.3; // round.png is 128px across → ~166px pool
+const LAMP_INTENSITY = 1;
+const HEADLIGHT_SCALE_X = 1.5; // cone.png is 112px long → ~168px beam
+const HEADLIGHT_SCALE_Y = 1.25;
+/** Faint light around the vehicle itself so it never disappears in the dark. */
+const VEHICLE_AURA = 0.35;
+
 /** Extra light-map border so camera movement within a frame never shows an unlit edge. */
 const MARGIN = 48;
 /** How far beyond the view lights are still stamped (their radius). */
-const REACH = 72;
+const REACH = 96;
 /** Seconds for a full dusk/dawn transition. */
 const TRANSITION_S = 2.2;
 
@@ -103,7 +111,7 @@ export class NightLighting {
     for (const lamp of this.track.lamps.query(x0, y0, x1, y1)) {
       const on = n > 0.3 + lamp.seed * 0.4 ? 1 : 0;
       if (!on) continue;
-      stamp(lm, 'light-round', lamp.x, lamp.y - 4, LAMP_LIGHT, 0.95 * n);
+      stamp(lm, 'light-round', lamp.x, lamp.y - 4, LAMP_LIGHT, LAMP_INTENSITY * n, { scale: LAMP_SCALE });
       stamp(gm, 'light-small', lamp.x, lamp.y - 20, LAMP_GLOW, 0.55 * n);
     }
     // Shop windows and some flats.
@@ -123,7 +131,14 @@ export class NightLighting {
     const s = Math.sin(car.heading);
     const front = car.spec.halfLength - 1;
     const back = -car.spec.halfLength;
-    stamp(lm, 'light-cone', car.x + c * front, car.y + s * front, HEADLIGHT, n, { originX: 0, originY: 0.5, rotation: car.heading });
+    stamp(lm, 'light-cone', car.x + c * front, car.y + s * front, HEADLIGHT, n, {
+      originX: 0,
+      originY: 0.5,
+      rotation: car.heading,
+      scaleX: HEADLIGHT_SCALE_X,
+      scaleY: HEADLIGHT_SCALE_Y,
+    });
+    stamp(lm, 'light-small', car.x, car.y, HEADLIGHT, VEHICLE_AURA * n, { scale: 1.5 });
     for (const side of [-1, 1]) {
       const sx = -s * side * (car.spec.halfWidth - 1);
       const sy = c * side * (car.spec.halfWidth - 1);
