@@ -3,51 +3,63 @@
 2D top-down arcade racing game set in central Norrköping, Sweden. Runs in the browser.
 
 ## Stack
-- **Phaser 4** (v4.2.x) + **Vite** + **TypeScript** (strict).
-- `pixelArt: true`, internal resolution **192×144**, scaled by integer zoom (computed from the window size).
-- Cosy Game Boy / Pokémon-style palette — defined once in `src/game/palette.ts`. Reuse it; don't invent new colours ad hoc.
+- **Phaser 4** (v4.2.x) + **Vite** + **TypeScript** (strict). Scripts run with `tsx`.
+- `pixelArt: true`, internal resolution **192×144**, `Scale.NONE` + `MAX_ZOOM` (integer zoom, recomputed on resize).
+- Cosy Game Boy / Pokémon-style palette, defined once in `src/game/palette.ts`. Reuse it rather than adding
+  one-off colours.
+- Phaser ships LLM-oriented docs in `node_modules/phaser/skills/*/SKILL.md` (v4 migration, tilemaps, etc.).
+  Check them before relying on v3 knowledge.
 
 ## Layout
 ```
-scripts/fetch-map.ts     Node script: Overpass → raster tile grid → Tiled JSON
-scripts/lib/             Pure helpers for the script (projection, rasterizing, autotiling)
-data/osm-cache.json      Cached Overpass response (committed; makes the game work offline)
-public/assets/maps/      Generated Tiled map (norrkoping.json) — do not hand-edit, regenerate
-public/assets/tiles/     Tileset PNG(s) — placeholder, meant to be replaced in Aseprite
-src/main.ts              Phaser game config + boot
-src/scenes/              Boot (placeholder texture generation), Race, Credits
-src/game/                Gameplay code: Car physics, tile definitions, palette, input
+scripts/fetch-map.ts        OSM (Overpass) → rotated tile grid → Tiled JSON + data/map-preview.png
+scripts/gen-placeholders.ts Writes placeholder PNGs (tileset, car, font) if missing; --force overwrites
+scripts/lib/                overpass client, projection/rotation + multipolygon rings, rasterizer, PNG encoder
+data/osm-cache.json         Cached Overpass responses (committed, so builds work offline)
+public/assets/maps/         Generated norrkoping.json. Don't hand-edit; regenerate it.
+public/assets/{tiles,sprites,fonts}/  Placeholder art, meant to be replaced in Aseprite
+src/main.ts                 Phaser config; exposes window.game in dev
+src/scenes/                 Boot (load + RetroFont), Race (gameplay + HUD), Credits (overlay)
+src/game/                   Car physics, TrackMap, surfaces, tiles (index contract), palette, font, input
 ```
 
 ## Map pipeline
-- Data: **OpenStreetMap via Overpass API** only. Never Google Maps (ToS forbids deriving data). ODbL attribution
-  ("© OpenStreetMap contributors") must stay in the in-game credits and README.
-- Area: the central grid bounded by Kungsgatan (W), Södra promenaden (S), Östra promenaden (E), Norra promenaden (N),
-  plus a slice of Motala ström north of Norra promenaden. The bbox is derived from those street geometries in the
-  cache; constants live at the top of `scripts/fetch-map.ts`.
-- `npm run fetch-map` uses `data/osm-cache.json` if present; `npm run fetch-map -- --refresh` re-queries Overpass.
-- Tiles are 16×16 px ≈ 4.5 m. Roads are rasterized wider than reality so they're drivable, then autotiled using a
-  4-bit neighbour mask (N=1, E=2, S=4, W=8) → straights, corners, T-junctions, crossings, dead-ends.
-- Output is Tiled-compatible JSON (orthogonal, CSV-less plain `data` arrays) with layers `ground` and `collision`
-  (object-free; collision is derived from tile properties). Tile properties: `surface` (asphalt/cobble/grass/water/
-  building/sidewalk) — the game reads grip & solidity from `src/game/tiles.ts` keyed by tile index.
+- Data comes only from **OpenStreetMap via Overpass**. Never use Google Maps (its ToS forbid deriving data). ODbL attribution
+  ("© OpenStreetMap contributors") must stay in the HUD corner, the credits scene, index.html and README.
+- The frame is derived from the boundary streets: Kungsgatan (W), Södra Promenaden (S), Östra Promenaden (E) and
+  Norra Promenaden (N; only the part west of where Östra ends). OSM names are capitalised "Promenaden". Motala ström
+  runs diagonally through the northern half of the frame.
+- The world is **rotated by the dominant street-grid angle (~15.1°)** so streets are axis-aligned. Projection
+  parameters are stored as map properties (`originLat/Lon`, `gridRotationDeg`, `frameMinU/MaxV`, `metresPerTile`),
+  so lat/lon → tile conversions can be reproduced later (see `scripts/lib/geo.ts`).
+- 16 px tile = 4.5 m. Roads are stroked 3 tiles wide (primary–tertiary) or 2 tiles (residential/living/pedestrian).
+  Paint order: paving (default) → green → water → parking/squares → buildings → roads (roads win, which gives bridges).
+- Overpass mirrors sometimes return 504 or an HTML "too busy" page. The client falls back across mirrors.
+- Output must stay deterministic: the same cache gives the same JSON.
 
 ## Tile indices are a contract
-`src/game/tiles.ts` and `scripts/lib/tiles.ts` must agree on tile index ↔ meaning. The placeholder tileset is
-generated at runtime in `BootScene` **and** written to `public/assets/tiles/tiles.png` by the fetch script so that
-Tiled can open the map. If you replace the tileset, keep the index layout (or update both tile tables).
+`src/game/tiles.ts` is imported by both the generator scripts and the game. Road tile id = base + 4-bit mask
+(N=1, E=2, S=4, W=8). Tileset tiles carry a `surface` property, and `TrackMap` reads it first (so Tiled edits work)
+and falls back to `surfaceOfTileId`.
 
 ## Gameplay conventions
-- Car physics is hand-rolled (no Arcade/Matter bodies): velocity is split into forward and lateral components;
-  lateral is damped by grip (low grip → more drift). See `src/game/Car.ts`.
-- Collision: sample tile solidity at a few points around the car; on hit, push back and reflect/dampen velocity.
-- Grip/drag per surface: asphalt > cobblestone > grass. Sidewalks are drivable but slower.
+- Hand-rolled physics, no Arcade/Matter. In `Car.ts` velocity is split into forward and lateral parts, and the lateral
+  part decays by `exp(-grip·dt)`. Speeds are px/s (≈ km/h).
+- Collision: 8 probe points on the car's rotated 11×7 box are tested against `TrackMap.isSolidAt`. Movement is
+  resolved per axis (slides along walls). Rotation is rejected if it would overlap.
+- Sprite rotation snaps to 32 directions for a crisp retro look. Physics heading is continuous.
+
+## Phaser 4 gotchas found so far
+- `RetroFont.Parse` returns the whole cache entry `{data, texture, frame}`, despite its typings. Pass it straight to
+  `cache.bitmapFont.add`.
+- `TilemapGPULayer` (`createLayer(..., true)`) rendered as a flat colour covering everything in 4.2.1. Use normal
+  `TilemapLayer`s (culling keeps them cheap).
+- A hidden browser tab pauses the game loop. When testing headlessly, call `game.step(t, dt)` manually.
 
 ## Commands
-- `npm run dev` — Vite dev server
-- `npm run fetch-map` — regenerate map from cache (or `-- --refresh` to hit Overpass)
-- `npm run typecheck` / `npm run build`
+- `npm run dev`, `npm run build`, `npm run typecheck`
+- `npm run fetch-map` (`-- --refresh` re-queries Overpass), `npm run gen-placeholders` (`-- --force`)
 
 ## Working style
-- Small steps, commit as you go. Keep the generated map deterministic (same cache → same JSON).
+- Small steps, commit as you go.
 - Don't add physics engines or heavy deps without a reason.
