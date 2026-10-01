@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { overpass, type LatLon, type OsmElement, type OsmNode, type OverpassResponse, type OsmWay } from './lib/overpass';
 import { buildingStyle, hasOutdoorSeating, POI_QUERY, poiFacade } from './lib/buildings';
 import { buildMarkings, type Marking } from './lib/markings';
+import { buildTramRoutes } from './lib/tram-routes';
 import { dominantGridAngle, Projection, relationRings, type Vec } from './lib/geo';
 import { fillRings, Grid, samplePolyline, samplePolylineWithDir, strokeLine } from './lib/raster';
 import { Img } from './lib/png';
@@ -620,7 +621,11 @@ function buildMap(cache: Cache) {
   for (const mk of markings) markingCounts[mk.kind] = (markingCounts[mk.kind] ?? 0) + 1;
   console.log('Road markings:', Object.entries(markingCounts).map(([k, v]) => `${k} ${v}`).join(', '));
 
-  return { cols, rows, groundIds, decorIds, spawn, rotation, origin, minU, maxV, tileToLatLon, ground, trees, streets: named, tram, lamps, bridges, markings };
+  // 8. Tram routes: each direction of each line as one path with its stops, for NPC trams.
+  const tramRoutes = buildTramRoutes(els, (p) => px(toTile(p)), inside);
+  console.log(`Tram routes: ${tramRoutes.map((r) => `${r.line} (${r.stops.length} stops)`).join(', ')}`);
+
+  return { cols, rows, groundIds, decorIds, spawn, rotation, origin, minU, maxV, tileToLatLon, ground, trees, streets: named, tram, lamps, bridges, markings, tramRoutes };
 }
 
 function findSpawn(ground: Grid<Ground>, mainRoad: Grid<boolean>, cols: number, rows: number) {
@@ -693,8 +698,8 @@ function toTiled(m: ReturnType<typeof buildMap>, cache: Cache) {
     height: m.rows,
     tilewidth: TILE_SIZE,
     tileheight: TILE_SIZE,
-    nextlayerid: 9,
-    nextobjectid: m.streets.length + m.tram.tracks.length + m.tram.stops.length + m.lamps.length + m.bridges.length + m.markings.length + 2,
+    nextlayerid: 10,
+    nextobjectid: m.streets.length + m.tram.tracks.length + m.tram.stops.length + m.lamps.length + m.bridges.length + m.markings.length + m.tramRoutes.length + 2,
     properties: [
       { name: 'attribution', type: 'string', value: cache.attribution },
       { name: 'osmTimestamp', type: 'string', value: cache.features.osm3s?.timestamp_osm_base ?? cache.fetchedAt },
@@ -887,6 +892,34 @@ function toTiled(m: ReturnType<typeof buildMap>, cache: Cache) {
         objects: m.markings.map((mk, i) =>
           markingObject(mk, m.streets.length + m.tram.tracks.length + m.tram.stops.length + m.lamps.length + m.bridges.length + 2 + i),
         ),
+      },
+      {
+        // One polyline per direction of each tram line, with its stops as distances (px) along it.
+        id: 9,
+        name: 'tramRoutes',
+        type: 'objectgroup',
+        draworder: 'topdown',
+        opacity: 1,
+        visible: false,
+        x: 0,
+        y: 0,
+        objects: m.tramRoutes.map((r, i) => ({
+          id: m.streets.length + m.tram.tracks.length + m.tram.stops.length + m.lamps.length + m.bridges.length + m.markings.length + 2 + i,
+          name: r.name,
+          type: 'route',
+          x: r.path[0].x,
+          y: r.path[0].y,
+          width: 0,
+          height: 0,
+          rotation: 0,
+          visible: true,
+          polyline: r.path.map((p) => ({ x: Math.round((p.x - r.path[0].x) * 10) / 10, y: Math.round((p.y - r.path[0].y) * 10) / 10 })),
+          properties: [
+            { name: 'line', type: 'string', value: r.line },
+            { name: 'osmId', type: 'int', value: r.osmId },
+            { name: 'stops', type: 'string', value: JSON.stringify(r.stops) },
+          ],
+        })),
       },
     ],
   };

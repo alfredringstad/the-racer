@@ -39,6 +39,10 @@ export class Car {
   down = 0;
   /** Set by the scene for boats: where the water is and which way it flows. */
   water?: Waterway;
+  /** Set by the scene: moving obstacles such as trams. */
+  obstacleAt?: (x: number, y: number) => boolean;
+  /** Already overlapping an obstacle (e.g. a tram swung into us on a curve): let us drive out. */
+  private inObstacle = false;
   /** Boat passing under a bridge: drawn faintly, since the deck is on top. */
   get underBridge() {
     return !!this.spec.onWater && this.map.surfaceAt(this.x, this.y) !== 'water';
@@ -152,6 +156,10 @@ export class Car {
     this.vx = fx * vF + rx * vL + wx;
     this.vy = fy * vF + ry * vL + wy;
 
+    const obstacle = this.obstacleAt;
+    this.inObstacle = false;
+    if (obstacle) this.inObstacle = this.probes.some(([px, py]) => obstacle(this.x + px * fx - py * fy, this.y + px * fy + py * fx));
+
     // Move per axis so we can slide along walls.
     this.impact = 0;
     const x0 = this.x;
@@ -249,6 +257,8 @@ export class Car {
       const dy = o.y - y;
       if (Math.abs(dx * c + dy * s) < this.spec.halfLength + LAMP_RADIUS && Math.abs(-dx * s + dy * c) < this.spec.halfWidth + LAMP_RADIUS) return true;
     }
+    const obstacle = this.obstacleAt;
+    if (obstacle && !this.inObstacle && this.probes.some(([px, py]) => obstacle(x + px * c - py * s, y + px * s + py * c))) return true;
     return false;
   }
 

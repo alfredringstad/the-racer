@@ -591,6 +591,40 @@ function drawBoat(): Img {
   return img;
 }
 
+/**
+ * One section of an articulated tram, seen from above and facing east (56×16): grey roof with
+ * gutters, a blue side band with windows, and either a cab (windscreen and lamps at the east end,
+ * AC unit on the roof) or a pantograph. The game bends a chain of these along the track.
+ */
+function drawTramSection(cab: boolean): Img {
+  const img = new Img(56, 16);
+  img.rect(0, 1, 56, 14, P.ink);
+  img.rect(1, 2, 54, 12, P.signBlue);
+  img.rect(1, 3, 54, 10, P.flat);
+  img.rect(1, 4, 54, 1, P.flatDark);
+  img.rect(1, 11, 54, 1, P.flatDark);
+  for (let x = 3; x < 52; x += 7) {
+    img.rect(x, 2, 5, 1, P.carGlass);
+    img.rect(x, 13, 5, 1, P.carGlass);
+  }
+  if (cab) {
+    img.set(55, 1, 0, 0);
+    img.set(55, 14, 0, 0);
+    img.rect(51, 3, 3, 10, P.carGlass);
+    img.rect(54, 2, 1, 12, P.ink);
+    img.set(54, 3, P.lamp);
+    img.set(54, 12, P.lamp);
+    img.rect(18, 5, 16, 6, P.flatDark);
+  } else {
+    img.rect(22, 5, 12, 6, P.flatDark);
+    for (let i = 0; i < 12; i++) {
+      img.set(22 + i, 5 + Math.round((i * 5) / 11), P.ink);
+      img.set(22 + i, 10 - Math.round((i * 5) / 11), P.ink);
+    }
+  }
+  return img;
+}
+
 /** Facing east (rotation 0 in Phaser). 16x16 with transparent margin. `roof` is columns 5-11 of the cabin rows. */
 function car(colors: { b: number; d: number; y: number }, roof: string): Img {
   const img = new Img(16, 16);
@@ -721,6 +755,8 @@ const outputs: Array<[string, () => Img]> = [
   ['public/assets/sprites/epa.png', drawEpa],
   ['public/assets/sprites/scooter.png', drawScooter],
   ['public/assets/sprites/boat.png', drawBoat],
+  ['public/assets/sprites/tram-cab.png', () => drawTramSection(true)],
+  ['public/assets/sprites/tram-mid.png', () => drawTramSection(false)],
   ['public/' + FONT.path, drawFont],
   ['public/assets/sprites/street-lamp.png', drawStreetLamp],
   ['public/assets/lights/round.png', () => drawRoundLight(128)],

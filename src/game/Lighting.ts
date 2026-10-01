@@ -43,6 +43,13 @@ const REACH = 96;
 /** Seconds for a full dusk/dawn transition. */
 const TRANSITION_S = 2.2;
 
+/** What the lighting needs to know about an NPC tram. */
+export interface TramLights {
+  front: { x: number; y: number; angle: number };
+  sections: { x: number; y: number }[];
+  alpha: number;
+}
+
 /**
  * Day/night lighting. Two screen-sized DynamicTextures follow the camera:
  * - `lightmap`: ambient colour + additive light shapes, MULTIPLY-blended over the world
@@ -90,7 +97,7 @@ export class NightLighting {
     this.target = this.target ? 0 : 1;
   }
 
-  update(dtMs: number, car: Car, braking: boolean) {
+  update(dtMs: number, car: Car, braking: boolean, trams: readonly TramLights[] = []) {
     const step = dtMs / 1000 / TRANSITION_S;
     this.night = this.target > this.night ? Math.min(this.target, this.night + step) : Math.max(this.target, this.night - step);
     const visible = this.night > 0.001;
@@ -143,6 +150,21 @@ export class NightLighting {
         if (n < 0.45 + g.seed * 0.5) continue;
         stamp(lm, 'light-small', g.x, g.y, WINDOW_LIGHT, 0.75 * n, { scale: 0.8 });
       }
+    }
+
+    // Trams: headlight beam ahead and lit windows along every section.
+    for (const t of trams) {
+      if (t.front.x < x0 || t.front.x > x1 || t.front.y < y0 || t.front.y > y1) {
+        if (!t.sections.some((p) => p.x >= x0 && p.x <= x1 && p.y >= y0 && p.y <= y1)) continue;
+      }
+      stamp(lm, 'light-cone', t.front.x, t.front.y, HEADLIGHT, HEADLIGHT_INTENSITY * n * t.alpha, {
+        originX: 0,
+        originY: 0.5,
+        rotation: t.front.angle,
+        scaleX: HEADLIGHT_SCALE_X,
+        scaleY: HEADLIGHT_SCALE_Y,
+      });
+      for (const p of t.sections) stamp(lm, 'light-small', p.x, p.y, WINDOW_LIGHT, 0.6 * n * t.alpha, { scale: 2.4 });
     }
 
     // Vehicle: headlight beam ahead, tail lights behind (brighter when braking). Boats get lanterns.

@@ -11,9 +11,12 @@ import { RoadMarkings } from '../game/RoadMarkings';
 import { NightLighting } from '../game/Lighting';
 import { VEHICLES, vehicleById } from '../game/vehicles';
 import { Waterway } from '../game/water';
+import { TramTraffic } from '../game/Trams';
 
 const SKID_POOL = 600;
 const SKID_SLIP = 22; // px/s of sideways speed before tyres leave marks
+/** Tram lines that run as NPC traffic. */
+const NPC_TRAM_LINES = ['2', '3'];
 const WAKE_SPEED = 15; // px/s through the water before a boat leaves a wake
 const LOOKAHEAD = 0.35; // seconds of velocity the camera leads by
 const STREET_LOOKUP_MS = 120;
@@ -44,6 +47,7 @@ export class RaceScene extends Phaser.Scene {
   private nextStreetLookup = 0;
   private lighting!: NightLighting;
   private wasDown = false;
+  private trams!: TramTraffic;
 
   constructor() {
     super('Race');
@@ -76,6 +80,8 @@ export class RaceScene extends Phaser.Scene {
     this.car = new Car(this, this.track, vehicle, spawn.x, spawn.y, spawn.heading);
     this.car.railCrossed = (x0, y0, x1, y1) => this.tram.railCrossed(x0, y0, x1, y1);
     this.car.water = water;
+    this.trams = new TramTraffic(this, mapData, NPC_TRAM_LINES);
+    this.car.obstacleAt = (x, y) => this.trams.solidAt(x, y);
     this.controls = new Controls(this);
 
     for (let i = 0; i < SKID_POOL; i++)
@@ -162,6 +168,7 @@ export class RaceScene extends Phaser.Scene {
   update(time: number, delta: number) {
     const car = this.car;
     const input = this.controls.read();
+    this.trams.update(delta, car);
     car.update(input, delta, time);
     this.track.updateChunks(this.cameras.main.worldView);
 
@@ -177,7 +184,7 @@ export class RaceScene extends Phaser.Scene {
 
     // Lamp posts draw over the car when it's behind (north of) them, under it otherwise.
     for (const lamp of this.track.lampSprites) lamp.setDepth(lamp.y > car.y ? 11 : 9.5);
-    this.lighting.update(delta, car, input.brake && car.forwardSpeed > 5);
+    this.lighting.update(delta, car, input.brake && car.forwardSpeed > 5, this.trams.trams.map((t) => t.lights));
 
     if (car.spec.wake) {
       if (Math.abs(car.forwardSpeed) > WAKE_SPEED && !car.underBridge) this.dropWake();
@@ -185,7 +192,9 @@ export class RaceScene extends Phaser.Scene {
 
     const kmh = Math.abs(car.forwardSpeed) * (this.track.metresPerTile / TILE_SIZE) * 3.6;
     this.hudSpeed.setText(String(Math.round(kmh)).padStart(3, '0') + ' KM/H');
-    this.hudSurface.setText(car.down > 0 ? car.downReason : car.wobble > 0.35 ? 'WOBBLY!' : car.surface.label);
+    this.hudSurface.setText(
+      car.down > 0 ? car.downReason : car.wobble > 0.35 ? 'WOBBLY!' : this.trams.bell ? 'DING DING!' : car.surface.label,
+    );
 
     if (time >= this.nextStreetLookup) {
       this.nextStreetLookup = time + STREET_LOOKUP_MS;
