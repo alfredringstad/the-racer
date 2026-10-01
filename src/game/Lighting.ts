@@ -16,7 +16,11 @@ const TAIL_LIGHT = 0xff3a2e;
 const LAMP_SCALE = 1.3; // round.png is 128px across → ~166px pool
 const LAMP_INTENSITY = 1;
 const HEADLIGHT_SCALE_X = 1.5; // cone.png is 112px long → ~168px beam
-const HEADLIGHT_SCALE_Y = 1.25;
+const HEADLIGHT_SCALE_Y = 1.35;
+/** Each of the two beams points this far outward from straight ahead (degrees). */
+const HEADLIGHT_TOE_OUT = 9;
+/** Brightness per beam; the two overlap in the middle. */
+const HEADLIGHT_INTENSITY = 0.7;
 /** Faint light around the vehicle itself so it never disappears in the dark. */
 const VEHICLE_AURA = 0.35;
 
@@ -131,13 +135,16 @@ export class NightLighting {
     const s = Math.sin(car.heading);
     const front = car.spec.halfLength - 1;
     const back = -car.spec.halfLength;
-    stamp(lm, 'light-cone', car.x + c * front, car.y + s * front, HEADLIGHT, n, {
-      originX: 0,
-      originY: 0.5,
-      rotation: car.heading,
-      scaleX: HEADLIGHT_SCALE_X,
-      scaleY: HEADLIGHT_SCALE_Y,
-    });
+    // Two beams, one from each headlight, angled slightly outwards.
+    const lampOffset = car.spec.halfWidth - 1;
+    for (const side of [-1, 1])
+      stamp(lm, 'light-cone', car.x + c * front - s * side * lampOffset, car.y + s * front + c * side * lampOffset, HEADLIGHT, HEADLIGHT_INTENSITY * n, {
+        originX: 0,
+        originY: 0.5,
+        rotation: car.heading + side * Phaser.Math.DegToRad(HEADLIGHT_TOE_OUT),
+        scaleX: HEADLIGHT_SCALE_X,
+        scaleY: HEADLIGHT_SCALE_Y,
+      });
     stamp(lm, 'light-small', car.x, car.y, HEADLIGHT, VEHICLE_AURA * n, { scale: 1.5 });
     for (const side of [-1, 1]) {
       const sx = -s * side * (car.spec.halfWidth - 1);
