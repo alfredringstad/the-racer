@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { FONT } from '../game/font';
+import { VEHICLES } from '../game/vehicles';
 
 export class BootScene extends Phaser.Scene {
   constructor() {
@@ -8,7 +9,7 @@ export class BootScene extends Phaser.Scene {
 
   preload() {
     this.load.image('tiles', 'assets/tiles/tiles.png');
-    this.load.image('car', 'assets/sprites/car.png');
+    for (const v of VEHICLES) this.load.image(v.sprite, `assets/sprites/${v.sprite}.png`);
     this.load.image(FONT.key, FONT.path);
     // Parsed by TrackMap itself (chunked rendering), so it's loaded as plain JSON.
     this.load.json('norrkoping', 'assets/maps/norrkoping.json');

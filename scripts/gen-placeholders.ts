@@ -1,4 +1,4 @@
-// Generates placeholder PNGs (tileset, car sprite, pixel font) into public/assets.
+// Generates placeholder PNGs (tileset, vehicle sprites, pixel font) into public/assets.
 // Existing files are left alone so hand-made art isn't clobbered; pass --force to overwrite.
 //
 //   npm run gen-placeholders [-- --force]
@@ -430,8 +430,18 @@ function drawTileset(): Img {
 }
 
 function drawCar(): Img {
-  // Facing east (rotation 0 in Phaser). 16x16 with transparent margin.
+  return car({ b: P.carBody, d: P.carDark, y: P.lane }, 'gbbbbgg');
+}
+
+/** Copper-green with a long panoramic glass roof and cool white headlights. */
+function drawEv(): Img {
+  return car({ b: P.copper, d: P.copperDark, y: P.uiText }, 'ggggggg');
+}
+
+/** Facing east (rotation 0 in Phaser). 16x16 with transparent margin. `roof` is columns 5-11 of the cabin rows. */
+function car(colors: { b: number; d: number; y: number }, roof: string): Img {
   const img = new Img(16, 16);
+  const cabin = `..kbd${roof}bk.`;
   img.pattern(0, 0, [
     '................',
     '................',
@@ -439,17 +449,17 @@ function drawCar(): Img {
     '...tt.....tt....',
     '..kkkkkkkkkkkk..',
     '..kbbbbbbbbbbyk.',
-    '..kbdgbbbbggbbk.',
-    '..kbdgbbbbggbbk.',
-    '..kbdgbbbbggbbk.',
-    '..kbdgbbbbggbbk.',
+    cabin,
+    cabin,
+    cabin,
+    cabin,
     '..kbbbbbbbbbbyk.',
     '..kkkkkkkkkkkk..',
     '...tt.....tt....',
     '................',
     '................',
     '................',
-  ], { k: P.ink, b: P.carBody, d: P.carDark, g: P.carGlass, y: P.lane, t: P.tyre });
+  ], { k: P.ink, g: P.carGlass, t: P.tyre, ...colors });
   return img;
 }
 
@@ -469,6 +479,7 @@ function drawFont(): Img {
 const outputs: Array<[string, () => Img]> = [
   ['public/assets/tiles/tiles.png', drawTileset],
   ['public/assets/sprites/car.png', drawCar],
+  ['public/assets/sprites/ev.png', drawEv],
   ['public/' + FONT.path, drawFont],
 ];
 

@@ -59,7 +59,28 @@ export const CAR: VehicleSpec = {
   railGrip: 0.7,
 };
 
-export const VEHICLES: readonly VehicleSpec[] = [CAR];
+/**
+ * Electric car: instant torque that tapers off, regen braking when you lift off, and
+ * the battery's weight means less grip, so it slides wide and thuds into walls.
+ */
+export const EV: VehicleSpec = {
+  ...CAR,
+  id: 'ev',
+  name: 'ELECTRIC CAR',
+  sprite: 'ev',
+  engine: 260,
+  engineFade: 0.6,
+  brake: 290,
+  reverseAccel: 130,
+  reverseMax: 60,
+  rolling: 45,
+  turnRate: 2.7,
+  grip: 0.72,
+  handbrakeGrip: 0.2,
+  bounce: 0.15,
+};
+
+export const VEHICLES: readonly VehicleSpec[] = [CAR, EV];
 
 export function vehicleById(id: unknown): VehicleSpec {
   return VEHICLES.find((v) => v.id === id) ?? CAR;

@@ -7,7 +7,7 @@ import { PALETTE } from '../game/palette';
 import { TILE_SIZE } from '../game/tiles';
 import { StreetIndex } from '../game/StreetIndex';
 import { TramNetwork } from '../game/TramNetwork';
-import { vehicleById } from '../game/vehicles';
+import { VEHICLES, vehicleById } from '../game/vehicles';
 
 const SKID_POOL = 600;
 const SKID_SLIP = 22; // px/s of sideways speed before tyres leave marks
@@ -77,6 +77,11 @@ export class RaceScene extends Phaser.Scene {
       this.scene.launch('Credits');
     });
     this.input.keyboard!.on('keydown-R', () => this.scene.restart());
+    this.input.keyboard!.on('keydown-V', () => {
+      const i = VEHICLES.indexOf(this.car.spec);
+      this.registry.set('vehicle', VEHICLES[(i + 1) % VEHICLES.length].id);
+      this.scene.restart();
+    });
   }
 
   private text(x: number, y: number, s: string, color: number = PALETTE.uiText) {
@@ -92,7 +97,7 @@ export class RaceScene extends Phaser.Scene {
     const credit = this.text(2, height - 8, '(C) OPENSTREETMAP CONTRIBUTORS').setAlpha(0.7);
     this.add.image(0, height - 9, 'px').setOrigin(0).setDisplaySize(credit.width + 4, 9).setTint(PALETTE.uiBg).setAlpha(0.5).setScrollFactor(0).setDepth(99);
 
-    const hint = this.text(0, 24, 'ARROWS/WASD DRIVE\nSPACE HANDBRAKE\nR RESET  C CREDITS');
+    const hint = this.text(0, 24, `${this.car.spec.name}\n\nARROWS/WASD DRIVE\nSPACE HANDBRAKE\nV VEHICLE  R RESET\nC CREDITS`);
     hint.setX(Math.round((width - hint.width) / 2)).setCenterAlign();
     const box = this.add.image(hint.x - 4, hint.y - 3, 'px').setOrigin(0).setDisplaySize(hint.width + 8, hint.height + 5)
       .setTint(PALETTE.uiBg).setAlpha(0.8).setScrollFactor(0).setDepth(99);
