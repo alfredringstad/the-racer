@@ -54,14 +54,19 @@ What the script does:
 1. Looks up the four boundary streets in Overpass and fetches roads, buildings, water, parks and trees in a box
    around them.
 2. Detects the dominant street-grid angle (about 15°) and rotates the world so streets line up with the tile grid.
-3. Frames the map on the four streets (+30 m margin) and rasterizes it to 16×16 px tiles at 4.5 m per tile
-   (≈ 330 × 324 tiles). Roads are widened to 2–3 tiles so they're drivable.
-4. Autotiles roads with a 4-bit neighbour mask (straights, corners, T-junctions, crossings), adds building facades
-   and quay edges, and writes a Tiled-compatible JSON map with `ground`, `decor` and `objects` layers.
-5. Writes `data/map-preview.png` (one pixel per tile) so you can check the result quickly.
+3. Frames the map on the four streets (+30 m margin) and rasterizes it to 16×16 px tiles at 2.25 m per tile
+   (≈ 659 × 648 tiles). Roads are widened (9–11 m) so they're drivable.
+4. Autotiles roads with a 4-bit neighbour mask (straights, corners, T-junctions, crossings). Outer corners are cut
+   diagonally, so diagonal streets get smooth 45° curbs instead of staircases.
+5. Styles buildings from their OSM tags (residential, church, civic, industrial, commercial) and draws them in
+   3/4 view (roof + two facade rows). Restaurant, café, bar and shop nodes get an awning on the nearest visible
+   facade, or outdoor tables if there isn't one. Churches get a steeple.
+6. Writes a Tiled-compatible JSON map with `ground` and `decor` tile layers, an `objects` layer (spawn point) and a
+   `streets` layer (named roads as polylines, squares as polygons, used for the street sign in the HUD).
+7. Writes `data/map-preview.png` (one pixel per tile) so you can check the result quickly.
 
-Tunables (tile size in metres, margin, road widths, which OSM tags map to what) are at the top of
-`scripts/fetch-map.ts`.
+Tunables (tile size in metres, margin, road widths, storefront search radius) are at the top of
+`scripts/fetch-map.ts`. Which OSM tags become which building style or storefront is in `scripts/lib/buildings.ts`.
 
 ## Replacing the placeholder art
 
@@ -74,10 +79,15 @@ npm run gen-placeholders
 It only writes files that don't exist yet, so once you've drawn your own art it won't be overwritten
 (`-- --force` regenerates everything).
 
-- `public/assets/tiles/tiles.png` — 16 columns × 3 rows of 16×16 tiles. Row 0 is ground/decor (grass, flowers,
-  sidewalk, water, quay, roof, facade, tree); row 1 is asphalt roads and row 2 cobblestone roads, where the column is
-  the neighbour mask N=1, E=2, S=4, W=8 (set bit = the road continues that way). Keep this layout, or update
-  `src/game/tiles.ts`.
+- `public/assets/tiles/tiles.png` — 16 columns × 6 rows of 16×16 tiles:
+  - row 0: ground and decor (grass, flowers, sidewalk, water, quay, small tree, café tables, steeple, 2×2 big tree)
+  - rows 1–2: asphalt and cobblestone roads, where the column is the neighbour mask N=1, E=2, S=4, W=8 (set bit =
+    the road continues that way)
+  - row 3: diagonal road edges (asphalt then cobblestone; NE, SE, SW, NW)
+  - row 4: roofs, then upper facades, per building style (residential, church, civic, industrial, commercial)
+  - row 5: street-level facades: the five styles, then restaurant, café, bar, shop
+
+  Keep this layout, or update `src/game/tiles.ts`. Every tile has a `name` property in the Tiled tileset.
 - `public/assets/sprites/car.png` — 16×16, facing east (right).
 - `public/assets/fonts/pixel-font.png` — 4×7 cells, character order in `src/game/font.ts`.
 
@@ -90,13 +100,14 @@ uses for grip and collision — change it in Tiled's tileset editor to change ho
 
 | Surface | Grip | Top speed | Notes |
 | --- | --- | --- | --- |
-| Asphalt | high | 130 | |
-| Cobblestone | medium | 105 | slight rumble |
-| Sidewalk / paving | medium | 85 | |
-| Grass | low | 60 | slides a lot |
+| Asphalt | high | 190 | |
+| Cobblestone | medium | 150 | slight rumble |
+| Sidewalk / paving | medium | 120 | |
+| Grass | low | 85 | slides a lot |
 | Building, water, tree | — | — | solid |
 
-Speeds are in px/s, which happens to be ≈ km/h at 4.5 m per 16 px tile. Values are in `src/game/surfaces.ts`.
+Speeds are in px/s. The HUD converts them to km/h using the map's `metresPerTile`. Values are in
+`src/game/surfaces.ts`.
 
 ## Scripts
 
