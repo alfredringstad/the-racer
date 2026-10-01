@@ -7,6 +7,7 @@ import { PALETTE } from '../game/palette';
 import { TILE_SIZE } from '../game/tiles';
 import { StreetIndex } from '../game/StreetIndex';
 import { TramNetwork } from '../game/TramNetwork';
+import { vehicleById } from '../game/vehicles';
 
 const SKID_POOL = 600;
 const SKID_SLIP = 22; // px/s of sideways speed before tyres leave marks
@@ -55,7 +56,7 @@ export class RaceScene extends Phaser.Scene {
     this.skidIndex = 0;
     this.look.set(0, 0);
     const spawn = this.track.spawn();
-    this.car = new Car(this, this.track, spawn.x, spawn.y, spawn.heading);
+    this.car = new Car(this, this.track, vehicleById(this.registry.get('vehicle')), spawn.x, spawn.y, spawn.heading);
     this.controls = new Controls(this);
 
     for (let i = 0; i < SKID_POOL; i++)
@@ -154,14 +155,14 @@ export class RaceScene extends Phaser.Scene {
     }
   }
 
-  /** Two dark pixels under the rear wheels, recycled from a fixed pool. */
+  /** Dark pixels under the rear wheels, recycled from a fixed pool. */
   private dropSkids() {
     const c = Math.cos(this.car.heading);
     const s = Math.sin(this.car.heading);
-    for (const side of [-3.5, 3.5]) {
+    for (const [wx, wy] of this.car.spec.skidWheels) {
       const skid = this.skids[this.skidIndex];
       this.skidIndex = (this.skidIndex + 1) % SKID_POOL;
-      skid.setPosition(Math.round(this.car.x - 4 * c - side * s), Math.round(this.car.y - 4 * s + side * c)).setVisible(true);
+      skid.setPosition(Math.round(this.car.x + wx * c - wy * s), Math.round(this.car.y + wx * s + wy * c)).setVisible(true);
     }
   }
 }

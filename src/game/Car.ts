@@ -1,24 +1,10 @@
 import Phaser from 'phaser';
 import type { DriveInput } from './input';
-import { SURFACES, withRails, type SurfaceParams } from './surfaces';
+import type { SurfaceParams } from './surfaces';
 import type { TrackMap } from './TrackMap';
+import { surfacesFor, type VehicleSpec, type VehicleSurfaces } from './vehicles';
 
-// Tuning (px, seconds).
-const ENGINE = 165; // px/s² at accel multiplier 1
-const BRAKE = 340;
-const REVERSE_ACCEL = 90;
-const REVERSE_MAX = 50;
-const ROLLING = 12; // px/s² coasting deceleration
-const TURN_RATE = 3.0; // rad/s at full steer
-const TURN_FULL_SPEED = 35; // px/s at which steering reaches full authority
-const HANDBRAKE_GRIP = 0.22; // grip multiplier while handbraking
-const BOUNCE = 0.3; // velocity kept (and reversed) on wall hit
 const SPRITE_ANGLE_STEPS = 32; // sprite rotation snaps to this many directions for a crisp retro look
-
-// Collision probe points in car-local space (x forward, y right). Sprite body is 12×8.
-const PROBES: ReadonlyArray<[number, number]> = [
-  [5.5, -3.5], [5.5, 3.5], [-5.5, -3.5], [-5.5, 3.5], [5.5, 0], [-5.5, 0], [0, -3.5], [0, 3.5],
-];
 
 export class Car {
   x: number;
@@ -26,7 +12,7 @@ export class Car {
   heading: number; // radians, 0 = east
   vx = 0;
   vy = 0;
-  surface: SurfaceParams = SURFACES.asphalt;
+  surface: SurfaceParams;
   /** Lateral speed this frame (px/s), for skid marks/HUD. */
   slip = 0;
   /** Impact speed of a collision this frame, 0 if none. */
@@ -34,10 +20,14 @@ export class Car {
 
   readonly sprite: Phaser.GameObjects.Image;
   readonly shadow: Phaser.GameObjects.Image;
+  private readonly surfaces: VehicleSurfaces;
+  /** Collision probe points in vehicle space (x forward, y right): corners and edge midpoints. */
+  private readonly probes: ReadonlyArray<[number, number]>;
 
   constructor(
     scene: Phaser.Scene,
     private readonly map: TrackMap,
+    readonly spec: VehicleSpec,
     x: number,
     y: number,
     headingDeg: number,
@@ -45,8 +35,13 @@ export class Car {
     this.x = x;
     this.y = y;
     this.heading = Phaser.Math.DegToRad(headingDeg);
-    this.shadow = scene.add.image(x, y, 'car').setTintMode(Phaser.TintModes.FILL).setTint(0x2b2a3a).setAlpha(0.35).setDepth(9);
-    this.sprite = scene.add.image(x, y, 'car').setDepth(10);
+    this.surfaces = surfacesFor(spec);
+    this.surface = this.surfaces.plain.asphalt;
+    const l = spec.halfLength;
+    const w = spec.halfWidth;
+    this.probes = [[l, -w], [l, w], [-l, -w], [-l, w], [l, 0], [-l, 0], [0, -w], [0, w]];
+    this.shadow = scene.add.image(x, y, spec.sprite).setTintMode(Phaser.TintModes.FILL).setTint(0x2b2a3a).setAlpha(0.35).setDepth(9);
+    this.sprite = scene.add.image(x, y, spec.sprite).setDepth(10);
     this.syncSprite(0);
   }
 
@@ -61,8 +56,8 @@ export class Car {
 
   update(input: DriveInput, dtMs: number, time: number) {
     const dt = Math.min(dtMs / 1000, 1 / 30);
-    this.surface = SURFACES[this.map.surfaceAt(this.x, this.y)];
-    if (this.map.onRailsAt(this.x, this.y)) this.surface = withRails(this.surface);
+    const v = this.spec;
+    this.surface = (this.map.onRailsAt(this.x, this.y) ? this.surfaces.railed : this.surfaces.plain)[this.map.surfaceAt(this.x, this.y)];
     const s = this.surface;
 
     const fx = Math.cos(this.heading);
@@ -74,23 +69,24 @@ export class Car {
     let vL = this.vx * rx + this.vy * ry;
 
     // Longitudinal
-    if (input.throttle) vF += (vF < -1 ? BRAKE : ENGINE * s.accel) * dt;
-    if (input.brake) vF -= (vF > 1 ? BRAKE : REVERSE_ACCEL * s.accel) * dt;
-    if (input.handbrake) vF -= Math.sign(vF) * Math.min(Math.abs(vF), BRAKE * 0.35 * dt);
-    if (!input.throttle && !input.brake) vF -= Math.sign(vF) * Math.min(Math.abs(vF), ROLLING * dt);
+    const engine = v.engine * s.accel * (1 - v.engineFade * Phaser.Math.Clamp(vF / s.maxSpeed, 0, 1));
+    if (input.throttle) vF += (vF < -1 ? v.brake : engine) * dt;
+    if (input.brake) vF -= (vF > 1 ? v.brake : v.reverseAccel * s.accel) * dt;
+    if (input.handbrake) vF -= Math.sign(vF) * Math.min(Math.abs(vF), v.brake * 0.35 * dt);
+    if (!input.throttle && !input.brake) vF -= Math.sign(vF) * Math.min(Math.abs(vF), v.rolling * dt);
     vF -= vF * s.drag * dt;
     // Soft speed caps so driving onto grass bleeds speed instead of stopping dead.
     if (vF > s.maxSpeed) vF += (s.maxSpeed - vF) * Math.min(1, 2.5 * dt);
-    if (vF < -REVERSE_MAX) vF += (-REVERSE_MAX - vF) * Math.min(1, 4 * dt);
+    if (vF < -v.reverseMax) vF += (-v.reverseMax - vF) * Math.min(1, 4 * dt);
 
     // Lateral: grip bleeds off sideways velocity; low grip → drift.
-    const grip = s.grip * (input.handbrake ? HANDBRAKE_GRIP : 1);
+    const grip = s.grip * v.grip * (input.handbrake ? v.handbrakeGrip : 1);
     vL *= Math.exp(-grip * dt);
     this.slip = vL;
 
     // Steering: needs some speed, slightly less authority at top speed, reversed when backing up.
-    const authority = Math.min(1, Math.abs(vF) / TURN_FULL_SPEED) * (1 - 0.3 * Math.min(1, Math.abs(vF) / 190));
-    const turn = input.steer * TURN_RATE * authority * Math.sign(vF) * (input.handbrake ? 1.35 : 1) * dt;
+    const authority = Math.min(1, Math.abs(vF) / v.turnFullSpeed) * (1 - 0.3 * Math.min(1, Math.abs(vF) / 190));
+    const turn = input.steer * v.turnRate * authority * Math.sign(vF) * (input.handbrake ? 1.35 : 1) * dt;
     if (turn !== 0 && !this.collides(this.x, this.y, this.heading + turn)) this.heading += turn;
 
     this.vx = fx * vF + rx * vL;
@@ -101,13 +97,13 @@ export class Car {
     const nx = this.x + this.vx * dt;
     if (this.collides(nx, this.y, this.heading)) {
       this.impact = Math.max(this.impact, Math.abs(this.vx));
-      this.vx *= -BOUNCE;
+      this.vx *= -v.bounce;
       this.vy *= 0.85;
     } else this.x = nx;
     const ny = this.y + this.vy * dt;
     if (this.collides(this.x, ny, this.heading)) {
       this.impact = Math.max(this.impact, Math.abs(this.vy));
-      this.vy *= -BOUNCE;
+      this.vy *= -v.bounce;
       this.vx *= 0.85;
     } else this.y = ny;
 
@@ -117,7 +113,7 @@ export class Car {
   private collides(x: number, y: number, heading: number) {
     const c = Math.cos(heading);
     const s = Math.sin(heading);
-    for (const [px, py] of PROBES) if (this.map.isSolidAt(x + px * c - py * s, y + px * s + py * c)) return true;
+    for (const [px, py] of this.probes) if (this.map.isSolidAt(x + px * c - py * s, y + px * s + py * c)) return true;
     return false;
   }
 
