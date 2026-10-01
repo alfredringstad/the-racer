@@ -11,6 +11,10 @@ const SHOP_LIGHT = 0xffcf8a;
 const WINDOW_LIGHT = 0xffe0a8;
 const HEADLIGHT = 0xfff4d6;
 const TAIL_LIGHT = 0xff3a2e;
+// Boat navigation lights: red to port (left), green to starboard (right), white all-round at the stern.
+const PORT_LIGHT = 0xff3a2e;
+const STARBOARD_LIGHT = 0x3aff7a;
+const STERN_LIGHT = 0xfff4d6;
 
 // Brightness knobs. Scales are relative to the light PNGs in public/assets/lights/.
 const LAMP_SCALE = 1.3; // round.png is 128px across → ~166px pool
@@ -130,11 +134,17 @@ export class NightLighting {
       }
     }
 
-    // Vehicle: headlight beam ahead, tail lights behind (brighter when braking).
+    // Vehicle: headlight beam ahead, tail lights behind (brighter when braking). Boats get lanterns.
     const c = Math.cos(car.heading);
     const s = Math.sin(car.heading);
     const front = car.spec.halfLength - 1;
     const back = -car.spec.halfLength;
+    if (car.spec.lights === 'boat') {
+      this.boatLights(stamp, car, c, s, front, back, n);
+      lm.render();
+      gm.render();
+      return;
+    }
     // Two beams, one from each headlight, angled slightly outwards.
     const lampOffset = car.spec.halfWidth - 1;
     for (const side of [-1, 1])
@@ -156,5 +166,37 @@ export class NightLighting {
 
     lm.render();
     gm.render();
+  }
+
+  /**
+   * Navigation lanterns: red to port and green to starboard at the bow, a white all-round light
+   * on the stern. No beam, just the lanterns and their shimmer on the water.
+   */
+  private boatLights(
+    stamp: (dt: Phaser.Textures.DynamicTexture, key: string, x: number, y: number, tint: number, alpha: number, extra?: Phaser.Types.Textures.StampConfig) => void,
+    car: Car,
+    c: number,
+    s: number,
+    front: number,
+    back: number,
+    n: number,
+  ) {
+    const lm = this.lightmap;
+    const gm = this.glowmap;
+    // Faded while passing under a bridge, like the boat itself.
+    const k = car.underBridge ? 0.35 : 1;
+    const bow = front - 2;
+    const off = car.spec.halfWidth - 1;
+    for (const [side, tint] of [[-1, PORT_LIGHT], [1, STARBOARD_LIGHT]] as const) {
+      const x = car.x + c * bow - s * side * off;
+      const y = car.y + s * bow + c * side * off;
+      stamp(gm, 'light-small', x, y, tint, 0.8 * n * k, { scale: 0.4 });
+      // Reflection spreading out on the water to that side.
+      stamp(lm, 'light-small', x - s * side * 6, y + c * side * 6, tint, 0.45 * n * k, { scale: 1.1 });
+    }
+    const sx = car.x + c * (back + 1);
+    const sy = car.y + s * (back + 1);
+    stamp(gm, 'light-small', sx, sy, STERN_LIGHT, 0.85 * n * k, { scale: 0.45 });
+    stamp(lm, 'light-small', sx, sy, STERN_LIGHT, 0.55 * n * k, { scale: 2.2 });
   }
 }

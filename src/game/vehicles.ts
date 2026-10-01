@@ -67,6 +67,8 @@ export interface VehicleSpec {
   current?: number;
   /** Leaves a white wake instead of skid marks. */
   wake?: boolean;
+  /** Night lights: headlights and tail lights (default), or navigation lanterns. */
+  lights?: 'car' | 'boat';
 }
 
 export const CAR: VehicleSpec = {
@@ -253,6 +255,7 @@ export const BOAT: VehicleSpec = {
   onWater: true,
   current: 24,
   wake: true,
+  lights: 'boat',
   engine: 90,
   engineFade: 0.3,
   brake: 70, // reverse thrust
