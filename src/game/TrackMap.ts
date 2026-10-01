@@ -222,8 +222,9 @@ export class TrackMap {
     const chunk: Chunk = { map, objects: [], textures: [] };
     const [x0, y0] = [cx * CHUNK_PX, cy * CHUNK_PX];
     for (const lamp of this.lamps.query(x0, y0, x0 + w * TILE_SIZE, y0 + h * TILE_SIZE)) {
-      // Foot of the post (row 21 of the 24px sprite) sits on the map point.
-      const sprite = this.scene.add.image(lamp.x, lamp.y, 'street-lamp').setOrigin(0.5, 21.5 / 24).setDepth(11);
+      // Foot of the post (row 21 of the 24px sprite) sits on the map point. Snapped to whole pixels:
+      // at a fractional position the post flips by 1px against the tiles as the camera scrolls.
+      const sprite = this.scene.add.image(Math.round(lamp.x), Math.round(lamp.y), 'street-lamp').setOrigin(0.5, 21 / 24).setDepth(11);
       this.lampSprites.add(sprite);
       chunk.objects.push(sprite);
     }
