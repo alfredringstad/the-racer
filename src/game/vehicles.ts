@@ -109,7 +109,7 @@ export const BIKE: VehicleSpec = {
   // A touch over real size for readability: the sprite is drawn 15 px long;
   // 15 × 1.0 × 0.140625 m/px ≈ 2.1 m (a real bicycle is ~1.75 m).
   scale: 1.0,
-  sway: { amplitude: 1.2, cycleM: 4.6 }, // ~90 rpm at 25 km/h = one sway per crank revolution
+  sway: { amplitude: 0.55, cycleM: 4.6 }, // ~90 rpm at 25 km/h = one sway per crank revolution
   engine: 150,
   engineFade: 0.75,
   brake: 300,
