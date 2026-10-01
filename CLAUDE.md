@@ -21,7 +21,7 @@ public/assets/maps/         Generated norrkoping.json. Don't hand-edit; regenera
 public/assets/{tiles,sprites,fonts}/  Placeholder art, meant to be replaced in Aseprite
 src/main.ts                 Phaser config; exposes window.game in dev
 src/scenes/                 Boot (load + RetroFont), Race (gameplay + HUD), Credits (overlay)
-src/game/                   Car physics, TrackMap (chunked rendering), StreetIndex, surfaces, tiles (index
+src/game/                   Car physics + vehicles.ts (VehicleSpec per vehicle), TrackMap (chunked rendering), StreetIndex, surfaces, tiles (index
                             contract), palette, font, input
 ```
 
@@ -66,7 +66,10 @@ and falls back to `surfaceOfTileId`.
 ## Gameplay conventions
 - Hand-rolled physics, no Arcade/Matter. In `Car.ts` velocity is split into forward and lateral parts, and the lateral
   part decays by `exp(-grip·dt)`. Speeds are px/s (≈ km/h).
-- Collision: 8 probe points on the car's rotated 11×7 box are tested against `TrackMap.isSolidAt`. Movement is
+- Vehicles (`src/game/vehicles.ts`): hatchback, electric car, bicycle. `VehicleSpec` holds all tuning, the hitbox
+  size, skid wheels and per-surface overrides. V cycles vehicles; the choice lives in `registry.vehicle`. The bike can
+  fall (`crashImpact`, and `railTrap` for shallow tram-rail crossings, tested exactly via `TramNetwork.railCrossed`).
+- Collision: 8 probe points on the vehicle's rotated box (`halfLength`/`halfWidth`) are tested against `TrackMap.isSolidAt`. Movement is
   resolved per axis (slides along walls). Rotation is rejected if it would overlap.
 - Sprite rotation snaps to 32 directions for a crisp retro look. Physics heading is continuous.
 
