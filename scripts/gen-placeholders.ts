@@ -521,12 +521,23 @@ function drawStreetLamp(): Img {
 
 /** 4×4 Bayer matrix, for dithered light falloff. */
 const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map((v) => (v + 0.5) / 16);
-/** Light intensity (0–1) quantised into a few bands with a dithered edge between them. */
+/**
+ * Light falloff style: 0 = smooth gradient; 2–8 = that many hard bands with a dithered edge
+ * between them (the more "pixel art" look).
+ */
+const LIGHT_BANDS = 0;
+
+/** Writes a greyscale light pixel for an intensity in 0–1. */
 function bandedLight(img: Img, x: number, y: number, intensity: number) {
-  const bands = 4;
-  const v = Math.max(0, Math.min(1, intensity)) * bands;
-  const level = Math.floor(v) + (v % 1 > BAYER[(y % 4) * 4 + (x % 4)] ? 1 : 0);
-  const c = Math.round((Math.min(level, bands) / bands) * 255);
+  const v = Math.max(0, Math.min(1, intensity));
+  let c: number;
+  if (LIGHT_BANDS > 0) {
+    const scaled = v * LIGHT_BANDS;
+    const level = Math.floor(scaled) + (scaled % 1 > BAYER[(y % 4) * 4 + (x % 4)] ? 1 : 0);
+    c = Math.round((Math.min(level, LIGHT_BANDS) / LIGHT_BANDS) * 255);
+  } else {
+    c = Math.round(v * v * (3 - 2 * v) * 255); // smoothstep, so the edge fades out softly
+  }
   if (c > 0) img.set(x, y, (c << 16) | (c << 8) | c);
 }
 
