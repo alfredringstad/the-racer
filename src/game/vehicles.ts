@@ -41,6 +41,8 @@ export interface VehicleSpec {
   spriteScale?: number;
   /** Where skid marks are dropped, [x forward, y right]. */
   skidWheels: ReadonlyArray<[number, number]>;
+  /** Fraction of speed lost per axle when mounting a curb (40% of that when dropping off one). Default 0.05. */
+  curbLoss?: number;
   /** Grip multiplier on tram rails. */
   railGrip: number;
   /** Per-surface overrides, e.g. a bike that's at home on the sidewalk. */
@@ -121,6 +123,7 @@ export const BIKE: VehicleSpec = {
   grip: 1.5,
   handbrakeGrip: 0.3,
   bounce: 0.2,
+  curbLoss: 0.12, // small wheels, you feel every curb
   halfLength: 5.5,
   halfWidth: 1.5,
   skidWheels: [[-4, 0]],
@@ -156,6 +159,7 @@ export const BUS: VehicleSpec = {
   grip: 0.85,
   handbrakeGrip: 0.3,
   bounce: 0.25,
+  curbLoss: 0.03, // heavy, big wheels
   halfLength: 8.5,
   halfWidth: 4.5,
   skidWheels: [[-5, -4.5], [-5, 4.5]],

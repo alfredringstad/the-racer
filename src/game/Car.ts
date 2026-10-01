@@ -2,8 +2,15 @@ import Phaser from 'phaser';
 import type { DriveInput } from './input';
 import type { SurfaceParams } from './surfaces';
 import { LAMP_RADIUS, type TrackMap } from './TrackMap';
-import { TILE_SIZE } from './tiles';
+import { TILE_SIZE, type Surface } from './tiles';
 import { surfacesFor, type VehicleSpec, type VehicleSurfaces } from './vehicles';
+
+/** Default speed loss per axle when mounting a curb (see VehicleSpec.curbLoss). */
+const CURB_LOSS = 0.05;
+/** How long the sprite stays lifted after hitting a curb, seconds. */
+const BUMP_TIME = 0.09;
+/** Surfaces that sit a curb's height above the road. */
+const isRaised = (s: Surface) => s === 'paving' || s === 'grass';
 
 const SPRITE_ANGLE_STEPS = 32; // sprite rotation snaps to this many directions for a crisp retro look
 
@@ -22,6 +29,11 @@ export class Car {
   slip = 0;
   /** Impact speed of a collision this frame, 0 if none. */
   impact = 0;
+  /** Speed at which an axle went over a curb this frame (0 if none), for camera feedback. */
+  bump = 0;
+  private bumpTimer = 0;
+  /** Whether the front/rear axle is currently up on raised ground; undefined until first update. */
+  private readonly axleRaised: [boolean | undefined, boolean | undefined] = [undefined, undefined];
   /** Seconds left lying on the ground after a fall (bike). */
   down = 0;
   /** Why we fell, for the HUD. */
@@ -137,8 +149,29 @@ export class Car {
       }
     }
 
+    this.updateCurbs(dt);
     if (v.sway) this.updateSway(v.sway, input.throttle, dt);
     this.syncSprite(time);
+  }
+
+  /** Curbs: when an axle crosses between road and raised ground (sidewalk, verge), bump and lose a little speed. */
+  private updateCurbs(dt: number) {
+    this.bump = 0;
+    this.bumpTimer = Math.max(0, this.bumpTimer - dt);
+    const c = Math.cos(this.heading);
+    const s = Math.sin(this.heading);
+    const axle = this.spec.halfLength * 0.7;
+    [axle, -axle].forEach((offset, i) => {
+      const raised = isRaised(this.map.surfaceAt(this.x + c * offset, this.y + s * offset));
+      const was = this.axleRaised[i];
+      this.axleRaised[i] = raised;
+      if (was === undefined || was === raised || this.speed < 5) return;
+      const loss = (this.spec.curbLoss ?? CURB_LOSS) * (raised ? 1 : 0.4);
+      this.vx *= 1 - loss;
+      this.vy *= 1 - loss;
+      this.bump = Math.max(this.bump, this.speed * (raised ? 1 : 0.6));
+      this.bumpTimer = BUMP_TIME;
+    });
   }
 
   /** Bike sway: rhythmic while pedalling (tied to distance, so cadence follows speed), a slow balance wobble when crawling. */
@@ -184,7 +217,8 @@ export class Car {
     // Sway is sideways to the direction of travel; the shadow stays put, which reads as leaning.
     const sx = -Math.sin(this.heading) * this.swayOffset;
     const sy = Math.cos(this.heading) * this.swayOffset;
-    this.sprite.setPosition(Math.round(this.x + jx + sx), Math.round(this.y + jy + sy)).setRotation(angle);
+    const hop = this.bumpTimer > 0 ? -1 : 0; // lifted 1px off its shadow for a moment after a curb
+    this.sprite.setPosition(Math.round(this.x + jx + sx), Math.round(this.y + jy + sy) + hop).setRotation(angle);
     this.shadow.setPosition(this.x + 1, this.y + 2).setRotation(angle);
   }
 }
