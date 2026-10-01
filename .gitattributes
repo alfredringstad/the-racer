@@ -1,0 +1,2 @@
+data/osm-cache.json linguist-generated=true -diff
+public/assets/maps/*.json linguist-generated=true -diff
