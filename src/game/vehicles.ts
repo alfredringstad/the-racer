@@ -30,6 +30,8 @@ export interface VehicleSpec {
   /** Collision box half-extents in vehicle space (x forward, y right). */
   halfLength: number;
   halfWidth: number;
+  /** Sprite scale; set from VEHICLE_SCALE, leave unset in the specs below. */
+  spriteScale?: number;
   /** Where skid marks are dropped, [x forward, y right]. */
   skidWheels: ReadonlyArray<[number, number]>;
   /** Grip multiplier on tram rails. */
@@ -153,10 +155,28 @@ export const BUS: VehicleSpec = {
   },
 };
 
-export const VEHICLES: readonly VehicleSpec[] = [CAR, EV, BUS, BIKE];
+/**
+ * Draws every vehicle this much bigger, together with everything tied to its size (hitbox,
+ * skid wheels, light positions). At 1 the 16px hatchback is about half real size (1 px = 0.14 m).
+ * Specs above stay in unscaled sprite pixels.
+ */
+export const VEHICLE_SCALE = 1.5;
+
+function scaled(v: VehicleSpec): VehicleSpec {
+  const k = VEHICLE_SCALE;
+  return {
+    ...v,
+    spriteScale: k,
+    halfLength: v.halfLength * k,
+    halfWidth: v.halfWidth * k,
+    skidWheels: v.skidWheels.map(([x, y]) => [x * k, y * k] as [number, number]),
+  };
+}
+
+export const VEHICLES: readonly VehicleSpec[] = [CAR, EV, BUS, BIKE].map(scaled);
 
 export function vehicleById(id: unknown): VehicleSpec {
-  return VEHICLES.find((v) => v.id === id) ?? CAR;
+  return VEHICLES.find((v) => v.id === id) ?? VEHICLES[0];
 }
 
 export interface VehicleSurfaces {

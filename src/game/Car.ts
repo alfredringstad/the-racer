@@ -46,8 +46,9 @@ export class Car {
     const l = spec.halfLength;
     const w = spec.halfWidth;
     this.probes = [[l, -w], [l, w], [-l, -w], [-l, w], [l, 0], [-l, 0], [0, -w], [0, w]];
-    this.shadow = scene.add.image(x, y, spec.sprite).setTintMode(Phaser.TintModes.FILL).setTint(0x2b2a3a).setAlpha(0.35).setDepth(9);
-    this.sprite = scene.add.image(x, y, spec.sprite).setDepth(10);
+    const scale = spec.spriteScale ?? 1;
+    this.shadow = scene.add.image(x, y, spec.sprite).setScale(scale).setTintMode(Phaser.TintModes.FILL).setTint(0x2b2a3a).setAlpha(0.35).setDepth(9);
+    this.sprite = scene.add.image(x, y, spec.sprite).setScale(scale).setDepth(10);
     this.syncSprite(0);
   }
 
