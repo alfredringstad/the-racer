@@ -8,7 +8,8 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "fetch-map": "tsx scripts/fetch-map.ts"
+    "fetch-map": "tsx scripts/fetch-map.ts",
+    "gen-placeholders": "tsx scripts/gen-placeholders.ts"
   },
   "dependencies": {
     "phaser": "^4.2.1"
