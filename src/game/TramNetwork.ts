@@ -10,6 +10,7 @@ const SLEEPER_SPACING = 5;
 const SLEEPER_OVERHANG = 3;
 
 type Pt = { x: number; y: number };
+type Seg = { a: Pt; b: Pt };
 
 interface Track {
   centre: Pt[];
@@ -34,6 +35,10 @@ export class TramNetwork {
   /** 1 where a rail passes through the tile. */
   readonly railTiles: Uint8Array;
   private readonly halfGauge: number;
+  /** Rail segments passing through each tile, for exact crossing tests. */
+  private readonly railSegs = new Map<number, Seg[]>();
+  private readonly width: number;
+  private readonly height: number;
 
   constructor(
     map: TiledMap,
@@ -42,6 +47,8 @@ export class TramNetwork {
   ) {
     this.halfGauge = (GAUGE_M / (metresPerTile / TILE_SIZE)) / 2;
     this.railTiles = new Uint8Array(map.width * map.height);
+    this.width = map.width;
+    this.height = map.height;
     const objects = map.layers.find((l) => l.name === 'tram')?.objects ?? [];
     for (const o of objects) {
       if (o.type === 'stop') this.stops.push({ name: o.name, x: o.x, y: o.y });
@@ -54,12 +61,39 @@ export class TramNetwork {
       const bounds = new Phaser.Geom.Rectangle(Math.min(...xs) - pad, Math.min(...ys) - pad, Math.max(...xs) - Math.min(...xs) + pad * 2, Math.max(...ys) - Math.min(...ys) + pad * 2);
       this.tracks.push({ centre, rails, bounds });
       for (const rail of rails)
-        walk(rail, 2, (x, y) => {
-          const c = Math.floor(x / TILE_SIZE);
-          const r = Math.floor(y / TILE_SIZE);
-          if (c >= 0 && r >= 0 && c < map.width && r < map.height) this.railTiles[r * map.width + c] = 1;
-        });
+        for (let i = 1; i < rail.length; i++) {
+          const seg = { a: rail[i - 1], b: rail[i] };
+          walk([seg.a, seg.b], 2, (x, y) => {
+            const c = Math.floor(x / TILE_SIZE);
+            const r = Math.floor(y / TILE_SIZE);
+            if (c < 0 || r < 0 || c >= map.width || r >= map.height) return;
+            const k = r * map.width + c;
+            this.railTiles[k] = 1;
+            const list = this.railSegs.get(k);
+            if (!list) this.railSegs.set(k, [seg]);
+            else if (list[list.length - 1] !== seg) list.push(seg);
+          });
+        }
     }
+  }
+
+  /**
+   * If the move from (x0, y0) to (x1, y1) crosses a rail, returns the rail's unit direction.
+   * Moves are a few px per frame, so only the tiles around the start point are searched.
+   */
+  railCrossed(x0: number, y0: number, x1: number, y1: number): Pt | undefined {
+    const c0 = Math.floor(x0 / TILE_SIZE);
+    const r0 = Math.floor(y0 / TILE_SIZE);
+    for (let r = r0 - 1; r <= r0 + 1; r++)
+      for (let c = c0 - 1; c <= c0 + 1; c++) {
+        if (c < 0 || r < 0 || c >= this.width || r >= this.height) continue;
+        for (const { a, b } of this.railSegs.get(r * this.width + c) ?? []) {
+          if (!segmentsIntersect(x0, y0, x1, y1, a.x, a.y, b.x, b.y)) continue;
+          const len = Math.hypot(b.x - a.x, b.y - a.y);
+          return { x: (b.x - a.x) / len, y: (b.y - a.y) / len };
+        }
+      }
+    return undefined;
   }
 
   /** Nearest stop within `radius` px. */
@@ -132,6 +166,15 @@ function offset(pts: Pt[], d: number): Pt[] {
 }
 
 /** Calls `fn` every `step` px along a polyline with the unit direction. */
+function segmentsIntersect(ax: number, ay: number, bx: number, by: number, cx: number, cy: number, dx: number, dy: number) {
+  const cross = (px: number, py: number, qx: number, qy: number, rx: number, ry: number) => (qx - px) * (ry - py) - (qy - py) * (rx - px);
+  const d1 = cross(cx, cy, dx, dy, ax, ay);
+  const d2 = cross(cx, cy, dx, dy, bx, by);
+  const d3 = cross(ax, ay, bx, by, cx, cy);
+  const d4 = cross(ax, ay, bx, by, dx, dy);
+  return d1 * d2 < 0 && d3 * d4 < 0;
+}
+
 function walk(pts: Pt[], step: number, fn: (x: number, y: number, dx: number, dy: number) => void) {
   let carry = 0;
   for (let i = 1; i < pts.length; i++) {

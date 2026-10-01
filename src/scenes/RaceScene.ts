@@ -38,6 +38,7 @@ export class RaceScene extends Phaser.Scene {
   private tram!: TramNetwork;
   private streetName: string | undefined;
   private nextStreetLookup = 0;
+  private wasDown = false;
 
   constructor() {
     super('Race');
@@ -57,6 +58,7 @@ export class RaceScene extends Phaser.Scene {
     this.look.set(0, 0);
     const spawn = this.track.spawn();
     this.car = new Car(this, this.track, vehicleById(this.registry.get('vehicle')), spawn.x, spawn.y, spawn.heading);
+    this.car.railCrossed = (x0, y0, x1, y1) => this.tram.railCrossed(x0, y0, x1, y1);
     this.controls = new Controls(this);
 
     for (let i = 0; i < SKID_POOL; i++)
@@ -143,13 +145,15 @@ export class RaceScene extends Phaser.Scene {
     this.look.x += (car.vx * LOOKAHEAD - this.look.x) * k;
     this.look.y += (car.vy * LOOKAHEAD - this.look.y) * k;
     this.cameras.main.setFollowOffset(-this.look.x, -this.look.y);
+    if (car.down > 0 && !this.wasDown) this.cameras.main.shake(200, 0.012);
+    this.wasDown = car.down > 0;
     if (car.impact > 45) this.cameras.main.shake(120, Math.min(0.02, car.impact / 6000));
 
     if (Math.abs(car.slip) > SKID_SLIP || (input.handbrake && car.speed > 30)) this.dropSkids();
 
     const kmh = Math.abs(car.forwardSpeed) * (this.track.metresPerTile / TILE_SIZE) * 3.6;
     this.hudSpeed.setText(String(Math.round(kmh)).padStart(3, '0') + ' KM/H');
-    this.hudSurface.setText(car.surface.label);
+    this.hudSurface.setText(car.down > 0 ? car.downReason : car.surface.label);
 
     if (time >= this.nextStreetLookup) {
       this.nextStreetLookup = time + STREET_LOOKUP_MS;

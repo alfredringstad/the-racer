@@ -438,6 +438,30 @@ function drawEv(): Img {
   return car({ b: P.copper, d: P.copperDark, y: P.uiText }, 'ggggggg');
 }
 
+/** Rider seen from above, facing east: helmet, shoulders, arms to the handlebar, wheels fore and aft. */
+function drawBike(): Img {
+  const img = new Img(16, 16);
+  img.pattern(0, 0, [
+    '................',
+    '................',
+    '................',
+    '................',
+    '................',
+    '....kkkk........',
+    '...kbbbbkssk....',
+    '.tttkbbhhkfftttt',
+    '.tttkbbhhkfftttt',
+    '...kbbbbkssk....',
+    '....kkkk........',
+    '................',
+    '................',
+    '................',
+    '................',
+    '................',
+  ], { k: P.ink, b: P.awningBlue, h: P.gold, s: P.lamp, f: P.carBody, t: P.tyre });
+  return img;
+}
+
 /** Facing east (rotation 0 in Phaser). 16x16 with transparent margin. `roof` is columns 5-11 of the cabin rows. */
 function car(colors: { b: number; d: number; y: number }, roof: string): Img {
   const img = new Img(16, 16);
@@ -479,6 +503,7 @@ function drawFont(): Img {
 const outputs: Array<[string, () => Img]> = [
   ['public/assets/tiles/tiles.png', drawTileset],
   ['public/assets/sprites/car.png', drawCar],
+  ['public/assets/sprites/bike.png', drawBike],
   ['public/assets/sprites/ev.png', drawEv],
   ['public/' + FONT.path, drawFont],
 ];

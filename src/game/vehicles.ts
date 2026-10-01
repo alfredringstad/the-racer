@@ -36,6 +36,12 @@ export interface VehicleSpec {
   railGrip: number;
   /** Per-surface overrides, e.g. a bike that's at home on the sidewalk. */
   surfaces?: Partial<Record<Surface, Partial<SurfaceParams>>>;
+  /** Wall impact speed (px/s) that knocks the rider off. Unset = can't fall. */
+  crashImpact?: number;
+  /** Crossing tram rails at a shallow angle (degrees) above minSpeed catches the wheel in the groove. */
+  railTrap?: { minDeg: number; maxDeg: number; minSpeed: number };
+  /** Seconds spent getting back up after a fall. */
+  downTime?: number;
 }
 
 export const CAR: VehicleSpec = {
@@ -80,7 +86,41 @@ export const EV: VehicleSpec = {
   bounce: 0.15,
 };
 
-export const VEHICLES: readonly VehicleSpec[] = [CAR, EV];
+/**
+ * Bicycle: slow on open road but nimble, narrow and at home on the sidewalk. Cobbles
+ * rattle, and tram rails crossed at a shallow angle catch the front wheel.
+ */
+export const BIKE: VehicleSpec = {
+  id: 'bike',
+  name: 'BICYCLE',
+  sprite: 'bike',
+  engine: 150,
+  engineFade: 0.75,
+  brake: 300,
+  reverseAccel: 25,
+  reverseMax: 12, // walking it backwards
+  rolling: 16,
+  turnRate: 4.2,
+  turnFullSpeed: 18,
+  grip: 1.5,
+  handbrakeGrip: 0.3,
+  bounce: 0.2,
+  halfLength: 5.5,
+  halfWidth: 1.5,
+  skidWheels: [[-4, 0]],
+  railGrip: 0.5,
+  surfaces: {
+    asphalt: { maxSpeed: 120 },
+    paving: { maxSpeed: 112, accel: 0.95, drag: 0.4 },
+    cobble: { maxSpeed: 80, accel: 0.7, drag: 0.9, rumble: 1 },
+    grass: { maxSpeed: 45, accel: 0.45, drag: 2.2 },
+  },
+  crashImpact: 70,
+  railTrap: { minDeg: 6, maxDeg: 28, minSpeed: 30 },
+  downTime: 1.2,
+};
+
+export const VEHICLES: readonly VehicleSpec[] = [CAR, EV, BIKE];
 
 export function vehicleById(id: unknown): VehicleSpec {
   return VEHICLES.find((v) => v.id === id) ?? CAR;

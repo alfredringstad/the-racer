@@ -17,6 +17,12 @@ export class Car {
   slip = 0;
   /** Impact speed of a collision this frame, 0 if none. */
   impact = 0;
+  /** Seconds left lying on the ground after a fall (bike). */
+  down = 0;
+  /** Why we fell, for the HUD. */
+  downReason = '';
+  /** Set by the scene: returns the rail direction if a move crosses a tram rail. */
+  railCrossed?: (x0: number, y0: number, x1: number, y1: number) => { x: number; y: number } | undefined;
 
   readonly sprite: Phaser.GameObjects.Image;
   readonly shadow: Phaser.GameObjects.Image;
@@ -56,6 +62,10 @@ export class Car {
 
   update(input: DriveInput, dtMs: number, time: number) {
     const dt = Math.min(dtMs / 1000, 1 / 30);
+    if (this.down > 0) {
+      this.down -= dt;
+      input = { throttle: false, brake: false, steer: 0, handbrake: false };
+    }
     const v = this.spec;
     this.surface = (this.map.onRailsAt(this.x, this.y) ? this.surfaces.railed : this.surfaces.plain)[this.map.surfaceAt(this.x, this.y)];
     const s = this.surface;
@@ -81,6 +91,7 @@ export class Car {
 
     // Lateral: grip bleeds off sideways velocity; low grip → drift.
     const grip = s.grip * v.grip * (input.handbrake ? v.handbrakeGrip : 1);
+    if (this.down > 0) vF *= Math.exp(-5 * dt); // sliding along on your side
     vL *= Math.exp(-grip * dt);
     this.slip = vL;
 
@@ -94,6 +105,8 @@ export class Car {
 
     // Move per axis so we can slide along walls.
     this.impact = 0;
+    const x0 = this.x;
+    const y0 = this.y;
     const nx = this.x + this.vx * dt;
     if (this.collides(nx, this.y, this.heading)) {
       this.impact = Math.max(this.impact, Math.abs(this.vx));
@@ -107,7 +120,24 @@ export class Car {
       this.vx *= 0.85;
     } else this.y = ny;
 
+    if (v.crashImpact && this.impact > v.crashImpact) this.fall('CRASH!');
+    if (v.railTrap && this.down <= 0 && this.speed > v.railTrap.minSpeed) {
+      const rail = this.railCrossed?.(x0, y0, this.x, this.y);
+      if (rail) {
+        // Angle between travel direction and the rail, 0..90°.
+        const cos = Math.abs(this.vx * rail.x + this.vy * rail.y) / this.speed;
+        const deg = Phaser.Math.RadToDeg(Math.acos(Math.min(1, cos)));
+        if (deg >= v.railTrap.minDeg && deg <= v.railTrap.maxDeg) this.fall('TRAM RAIL!');
+      }
+    }
+
     this.syncSprite(time);
+  }
+
+  private fall(reason: string) {
+    if (this.down > 0) return;
+    this.down = this.spec.downTime ?? 1;
+    this.downReason = reason;
   }
 
   private collides(x: number, y: number, heading: number) {
@@ -119,7 +149,9 @@ export class Car {
 
   private syncSprite(time: number) {
     const step = (Math.PI * 2) / SPRITE_ANGLE_STEPS;
-    const angle = Math.round(this.heading / step) * step;
+    // Lying on the ground: knocked a quarter-turn askew and blinking.
+    const angle = Math.round(this.heading / step) * step + (this.down > 0 ? Math.PI / 2 : 0);
+    this.sprite.setAlpha(this.down > 0 && Math.floor(time / 100) % 2 ? 0.4 : 1);
     // Rumble on rough surfaces, scaled by speed.
     const amp = this.surface.rumble * Math.min(1, this.speed / 60);
     const jx = amp ? Math.round(Math.sin(time * 0.07) * amp) : 0;
