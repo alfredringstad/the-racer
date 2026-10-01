@@ -19,7 +19,7 @@ import { buildTramRoutes } from './lib/tram-routes';
 import { dominantGridAngle, Projection, relationRings, type Vec } from './lib/geo';
 import { fillRings, Grid, samplePolyline, samplePolylineWithDir, strokeLine } from './lib/raster';
 import { Img } from './lib/png';
-import { DIAG_INDEX, E, N, S, T, TILE_COUNT, TILE_SIZE, TILESET_COLUMNS, TILESET_ROWS, W, lowerWallId, roofId, surfaceOfTileId, tileName, upperWallId, BUILDING_STYLES, FACADES, type BuildingStyle, type Facade } from '../src/game/tiles';
+import { DIAG_INDEX, DIAG_MASKS, E, N, S, T, TILE_COUNT, TILE_SIZE, TILESET_COLUMNS, TILESET_ROWS, W, lowerWallId, roofId, surfaceOfTileId, tileName, upperWallId, BUILDING_STYLES, FACADES, type BuildingStyle, type Facade } from '../src/game/tiles';
 import { PALETTE } from '../src/game/palette';
 
 // ---------------------------------------------------------------------------
@@ -614,7 +614,21 @@ function buildMap(cache: Cache) {
   const markingRoads = roads
     .filter((w) => w.nodes?.length === w.geometry.length)
     .map((w) => ({ id: w.id, nodes: w.nodes!, points: w.geometry.map((p) => px(toTile(p))), tags: w.tags!, widthPx: ROAD_WIDTH[w.tags!.highway] * TILE_SIZE }));
-  const markings = buildMarkings(markingRoads, specialNodes, METRES_PER_TILE / TILE_SIZE).filter((mk) =>
+  // Road as drawn, pixel-exact: diagonal-cut edge tiles are road only on their road side.
+  const roadPixel = (x: number, y: number) => {
+    const c = Math.floor(x / TILE_SIZE);
+    const r = Math.floor(y / TILE_SIZE);
+    if (c < 0 || r < 0 || c >= cols || r >= rows) return false;
+    const id = groundIds[r * cols + c];
+    if (id >= T.ROAD_ASPHALT_DIAG && id < T.ROAD_COBBLE_DIAG + 4) {
+      const mask = DIAG_MASKS[(id - T.ROAD_ASPHALT_DIAG) % 4];
+      const lx = x - c * TILE_SIZE;
+      const ly = y - r * TILE_SIZE;
+      return mask === (N | E) ? lx > ly : mask === (S | W) ? ly > lx : mask === (E | S) ? lx + ly > TILE_SIZE : lx + ly < TILE_SIZE;
+    }
+    return isRoad(ground.get(c, r));
+  };
+  const markings = buildMarkings(markingRoads, specialNodes, METRES_PER_TILE / TILE_SIZE, roadPixel).filter((mk) =>
     mk.kind === 'arrow' ? inside(mk) : mk.points.some(inside),
   );
   const markingCounts: Record<string, number> = {};

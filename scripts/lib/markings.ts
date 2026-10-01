@@ -28,9 +28,19 @@ const MAJOR = new Set(['primary', 'secondary', 'tertiary', 'trunk', 'motorway'])
 const COBBLE = new Set(['sett', 'cobblestone', 'unhewn_cobblestone', 'paving_stones', 'stone']);
 const MARKED_CROSSINGS = new Set(['marked', 'zebra', 'traffic_signals', 'uncontrolled']);
 
-export function buildMarkings(roads: MarkingRoad[], specialNodes: Map<number, Record<string, string>>, mPerPx: number): Marking[] {
+/**
+ * @param roadAt  whether a map pixel is drawn as road. Markings are centred on the road as drawn: the
+ *                carriageway is snapped to 16px tiles, so it can sit up to half a tile off the OSM centreline.
+ */
+export function buildMarkings(
+  roads: MarkingRoad[],
+  specialNodes: Map<number, Record<string, string>>,
+  mPerPx: number,
+  roadAt?: (x: number, y: number) => boolean,
+): Marking[] {
   const m = (metres: number) => metres / mPerPx;
   const out: Marking[] = [];
+  if (roadAt) roads = roads.map((r) => ({ ...r, points: recentre(r.points, r.widthPx, roadAt) }));
 
   // Junctions: nodes used by more than one road (or twice by the same one), with the widest road there.
   const uses = new Map<number, number>();
@@ -173,3 +183,65 @@ export function buildMarkings(roads: MarkingRoad[], specialNodes: Map<number, Re
   return out;
 }
 
+
+/** Width tolerance when matching a drawn carriageway to a road's own width (merged roads are wider). */
+const WIDTH_TOLERANCE = 20;
+/** Tile snapping can shift a road by at most half a tile; bigger measured offsets are mis-measurements. */
+const MAX_SHIFT = 9;
+/** Only recentre a road if at least this share of its samples saw a clean single carriageway. */
+const MIN_CLEAN_SHARE = 0.5;
+
+/**
+ * Shifts a centreline sideways onto the middle of the drawn carriageway. Per segment, the drawn road is
+ * scanned left and right at several points; the median offset is used, ignoring samples where the drawn
+ * road is much wider or narrower than this road (overlapping roads, car parks, junctions).
+ */
+function recentre(points: Pt[], widthPx: number, roadAt: (x: number, y: number) => boolean): Pt[] {
+  if (points.length < 2) return points;
+  const limit = widthPx + WIDTH_TOLERANCE + 4;
+  const segOffsets: (number | undefined)[] = [];
+  let tried = 0;
+  let clean = 0;
+  for (let i = 1; i < points.length; i++) {
+    const a = points[i - 1];
+    const b = points[i];
+    const len = Math.hypot(b.x - a.x, b.y - a.y);
+    if (!len) {
+      segOffsets.push(undefined);
+      continue;
+    }
+    const ux = (b.x - a.x) / len;
+    const uy = (b.y - a.y) / len;
+    const nx = -uy; // right of travel (y down)
+    const ny = ux;
+    const samples: number[] = [];
+    const step = Math.min(8, len / 2);
+    for (let s = step / 2; s < len; s += step) {
+      const x = a.x + ux * s;
+      const y = a.y + uy * s;
+      if (!roadAt(x, y)) continue;
+      tried++;
+      let left = 0;
+      let right = 0;
+      while (left < limit && roadAt(x - nx * (left + 1), y - ny * (left + 1))) left++;
+      while (right < limit && roadAt(x + nx * (right + 1), y + ny * (right + 1))) right++;
+      if (left >= limit || right >= limit || Math.abs(left + right + 1 - widthPx) > WIDTH_TOLERANCE) continue;
+      clean++;
+      samples.push(Math.max(-MAX_SHIFT, Math.min(MAX_SHIFT, (right - left) / 2)));
+    }
+    samples.sort((p, q) => p - q);
+    segOffsets.push(samples.length ? samples[Math.floor(samples.length / 2)] : undefined);
+  }
+  // Mostly merged with other roads or car parks: the measurements aren't trustworthy, keep the OSM line.
+  if (!tried || clean / tried < MIN_CLEAN_SHARE) return points;
+  // Segments without a usable measurement borrow from their neighbours (or stay put).
+  const known = segOffsets.map((o, i) => ({ o, i })).filter((e) => e.o !== undefined);
+  if (!known.length) return points;
+  const segOff = segOffsets.map((o, i) => o ?? known.reduce((best, e) => (Math.abs(e.i - i) < Math.abs(best.i - i) ? e : best)).o!);
+  // Each vertex moves by the average of its two segments, along the same mitred normal offsetPolyline uses.
+  const unit = offsetPolyline(points, 1);
+  return points.map((p, i) => {
+    const off = i === 0 ? segOff[0] : i === points.length - 1 ? segOff[segOff.length - 1] : (segOff[i - 1] + segOff[i]) / 2;
+    return { x: p.x + (unit[i].x - p.x) * off, y: p.y + (unit[i].y - p.y) * off };
+  });
+}
