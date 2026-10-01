@@ -163,6 +163,13 @@ async function loadData(refresh: boolean): Promise<Cache> {
 
 type Ground = 'paving' | 'grass' | 'water' | 'building' | 'asphalt' | 'cobble';
 type TreePart = 'small' | 'TL' | 'TR' | 'BL' | 'BR';
+interface StreetShape {
+  name: string;
+  kind: 'street' | 'square';
+  highway: string;
+  widthPx: number;
+  points: { x: number; y: number }[];
+}
 const TREE_TILE: Record<TreePart, number> = { small: T.TREE_SMALL, TL: T.TREE_TL, TR: T.TREE_TR, BL: T.TREE_BL, BR: T.TREE_BR };
 const isRoad = (g: Ground | undefined) => g === 'asphalt' || g === 'cobble';
 
@@ -343,7 +350,24 @@ function buildMap(cache: Cache) {
   for (const g of ground.cells) counts[g] = (counts[g] ?? 0) + 1;
   console.log('Tile mix:', Object.entries(counts).map(([k, v]) => `${k} ${((100 * v) / ground.cells.length).toFixed(1)}%`).join(', '));
 
-  return { cols, rows, groundIds, decorIds, spawn, rotation, origin, minU, maxV, tileToLatLon, ground, trees };
+  // 5. Street names: named roads as polylines, named squares as polygons (pixel coords).
+  const px = ([x, y]: Vec) => ({ x: Math.round(x * TILE_SIZE * 10) / 10, y: Math.round(y * TILE_SIZE * 10) / 10 });
+  const streetShapes: StreetShape[] = [];
+  for (const w of roads) {
+    const name = w.tags?.name;
+    if (!name) continue;
+    streetShapes.push({ name, kind: 'street', highway: w.tags!.highway, widthPx: ROAD_WIDTH[w.tags!.highway] * TILE_SIZE, points: w.geometry.map((p) => px(toTile(p))) });
+  }
+  for (const el of els) {
+    const name = tag(el, 'name');
+    if (!name || !(tag(el, 'place') === 'square' || (tag(el, 'highway') === 'pedestrian' && tag(el, 'area') === 'yes'))) continue;
+    for (const ring of ringsOf(el)) streetShapes.push({ name, kind: 'square', highway: tag(el, 'highway') ?? 'square', widthPx: 0, points: ring.slice(0, -1).map(px) });
+  }
+
+  const inside = ({ x, y }: { x: number; y: number }) => x >= 0 && y >= 0 && x <= cols * TILE_SIZE && y <= rows * TILE_SIZE;
+  const named = streetShapes.filter((st) => st.points.some(inside));
+
+  return { cols, rows, groundIds, decorIds, spawn, rotation, origin, minU, maxV, tileToLatLon, ground, trees, streets: named };
 }
 
 function findSpawn(ground: Grid<Ground>, mainRoad: Grid<boolean>, cols: number, rows: number) {
@@ -416,8 +440,8 @@ function toTiled(m: ReturnType<typeof buildMap>, cache: Cache) {
     height: m.rows,
     tilewidth: TILE_SIZE,
     tileheight: TILE_SIZE,
-    nextlayerid: 4,
-    nextobjectid: 2,
+    nextlayerid: 5,
+    nextobjectid: m.streets.length + 2,
     properties: [
       { name: 'attribution', type: 'string', value: cache.attribution },
       { name: 'osmTimestamp', type: 'string', value: cache.features.osm3s?.timestamp_osm_base ?? cache.fetchedAt },
@@ -472,6 +496,36 @@ function toTiled(m: ReturnType<typeof buildMap>, cache: Cache) {
             properties: [{ name: 'heading', type: 'float', value: m.spawn.heading }],
           },
         ],
+      },
+      {
+        id: 4,
+        name: 'streets',
+        type: 'objectgroup',
+        draworder: 'topdown',
+        opacity: 1,
+        visible: true,
+        x: 0,
+        y: 0,
+        objects: m.streets.map((st, i) => {
+          const [o] = st.points;
+          const rel = st.points.map((p) => ({ x: Math.round((p.x - o.x) * 10) / 10, y: Math.round((p.y - o.y) * 10) / 10 }));
+          return {
+            id: i + 2,
+            name: st.name,
+            type: st.kind,
+            x: o.x,
+            y: o.y,
+            width: 0,
+            height: 0,
+            rotation: 0,
+            visible: true,
+            ...(st.kind === 'street' ? { polyline: rel } : { polygon: rel }),
+            properties: [
+              { name: 'highway', type: 'string', value: st.highway },
+              { name: 'widthPx', type: 'float', value: st.widthPx },
+            ],
+          };
+        }),
       },
     ],
   };

@@ -61,6 +61,7 @@ export const PALETTE = {
   awningGreen: 0x5f9e6e,
   awningBlue: 0x4f7fbf,
   lamp: 0xffe9a8,
+  signBlue: 0x2f5d9e,
 
   carBody: 0xe04a4a,
   carDark: 0xa8323a,

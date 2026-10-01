@@ -5,10 +5,12 @@ import { TrackMap, type TiledMap } from '../game/TrackMap';
 import { FONT, fontSafe } from '../game/font';
 import { PALETTE } from '../game/palette';
 import { TILE_SIZE } from '../game/tiles';
+import { StreetIndex } from '../game/StreetIndex';
 
 const SKID_POOL = 600;
 const SKID_SLIP = 22; // px/s of sideways speed before tyres leave marks
 const LOOKAHEAD = 0.35; // seconds of velocity the camera leads by
+const STREET_LOOKUP_MS = 120;
 
 export class RaceScene extends Phaser.Scene {
   private track!: TrackMap;
@@ -19,13 +21,26 @@ export class RaceScene extends Phaser.Scene {
   private skids: Phaser.GameObjects.Image[] = [];
   private skidIndex = 0;
   private look = new Phaser.Math.Vector2();
+  private streets!: StreetIndex;
+  private sign!: Phaser.GameObjects.Container;
+  private signText!: Phaser.GameObjects.BitmapText;
+  private signBg!: Phaser.GameObjects.Image;
+  private signBorder!: Phaser.GameObjects.Image;
+  private streetName: string | undefined;
+  private nextStreetLookup = 0;
 
   constructor() {
     super('Race');
   }
 
   create() {
-    this.track = new TrackMap(this, this.cache.json.get('norrkoping') as TiledMap);
+    const mapData = this.cache.json.get('norrkoping') as TiledMap;
+    this.track = new TrackMap(this, mapData);
+    this.streets = new StreetIndex(mapData);
+    this.streetName = undefined;
+    this.skids = [];
+    this.skidIndex = 0;
+    this.look.set(0, 0);
     const spawn = this.track.spawn();
     this.car = new Car(this, this.track, spawn.x, spawn.y, spawn.heading);
     this.controls = new Controls(this);
@@ -68,6 +83,32 @@ export class RaceScene extends Phaser.Scene {
     const box = this.add.image(hint.x - 4, hint.y - 3, 'px').setOrigin(0).setDisplaySize(hint.width + 8, hint.height + 5)
       .setTint(PALETTE.uiBg).setAlpha(0.8).setScrollFactor(0).setDepth(99);
     this.time.delayedCall(5000, () => this.tweens.add({ targets: [hint, box], alpha: 0, duration: 600 }));
+
+    // Street sign, top right: white text on blue with a white rim, like a Swedish street sign.
+    this.signBorder = this.add.image(0, 0, 'px').setOrigin(0).setTint(PALETTE.uiText);
+    this.signBg = this.add.image(1, 1, 'px').setOrigin(0).setTint(PALETTE.signBlue);
+    this.signText = this.add.bitmapText(4, 3, FONT.key, '').setTint(PALETTE.uiText);
+    this.sign = this.add.container(0, -20, [this.signBorder, this.signBg, this.signText]).setScrollFactor(0).setDepth(100);
+  }
+
+  private setStreet(name: string | undefined) {
+    if (name === this.streetName) return;
+    this.streetName = name;
+    const { width } = this.scale;
+    this.tweens.killTweensOf(this.sign);
+    const show = () => {
+      if (!name) return;
+      this.signText.setText(fontSafe(name));
+      const w = this.signText.width + 8;
+      const h = FONT.cellHeight + 5;
+      this.signBorder.setDisplaySize(w, h);
+      this.signBg.setDisplaySize(w - 2, h - 2);
+      this.sign.setPosition(width - w - 3, -h - 2);
+      this.tweens.add({ targets: this.sign, y: 3, duration: 180, ease: 'Back.Out' });
+    };
+    // Slide the old sign out, then the new one in.
+    if (this.sign.y > -10) this.tweens.add({ targets: this.sign, y: -20, duration: 120, ease: 'Quad.In', onComplete: show });
+    else show();
   }
 
   update(time: number, delta: number) {
@@ -88,6 +129,11 @@ export class RaceScene extends Phaser.Scene {
     const kmh = Math.abs(car.forwardSpeed) * (this.track.metresPerTile / TILE_SIZE) * 3.6;
     this.hudSpeed.setText(String(Math.round(kmh)).padStart(3, '0') + ' KM/H');
     this.hudSurface.setText(car.surface.label);
+
+    if (time >= this.nextStreetLookup) {
+      this.nextStreetLookup = time + STREET_LOOKUP_MS;
+      this.setStreet(this.streets.at(car.x, car.y));
+    }
   }
 
   /** Two dark pixels under the rear wheels, recycled from a fixed pool. */
