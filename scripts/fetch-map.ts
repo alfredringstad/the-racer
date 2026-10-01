@@ -69,6 +69,10 @@ const MAIN_ROAD_TILES = ROAD_WIDTH.secondary;
 const STOREFRONT_SEARCH_M = 18;
 /** Storefronts span this many facade tiles (centre ± this). */
 const STOREFRONT_HALF_TILES = 1;
+/** Width (metres) of the deck laid under tram tracks that cross water on their own bridge. */
+const TRAM_BRIDGE_M = 6.75;
+/** Tram stop signs go on open ground within this distance (metres) of the stop node. */
+const STOP_SIGN_SEARCH_M = 9;
 /** Spacing of trees along natural=tree_row, in metres. */
 const TREE_ROW_SPACING_M = 7;
 
@@ -112,6 +116,10 @@ function featuresQuery(b: Cache['featuresBbox']) {
   way["amenity"="parking"];
   way["place"="square"];
   node["natural"="tree"];${POI_QUERY}
+  way["railway"="tram"];
+  way["railway"="platform"];
+  node["railway"="tram_stop"];
+  relation["route"="tram"];
 );
 out geom;`;
 }
@@ -166,7 +174,10 @@ async function loadData(refresh: boolean): Promise<Cache> {
 // Rasterize
 // ---------------------------------------------------------------------------
 
-type Ground = 'paving' | 'grass' | 'water' | 'building' | 'asphalt' | 'cobble';
+type Ground = 'paving' | 'grass' | 'water' | 'building' | 'asphalt' | 'cobble' | 'platform';
+/** Tram/bus-only streets are highway=service but are real streets in the city centre. */
+const isTransitStreet = (w: OsmElement) =>
+  w.tags?.highway === 'service' && (!!w.tags.embedded_rails || ['yes', 'designated'].includes(w.tags.bus ?? '') || w.tags.psv === 'designated');
 type TreePart = 'small' | 'TL' | 'TR' | 'BL' | 'BR';
 interface StreetShape {
   name: string;
@@ -297,9 +308,10 @@ function buildMap(cache: Cache) {
   const roads = els
     .filter((e): e is OsmWay => e.type === 'way')
     .filter((w) => {
-      const hw = w.tags?.highway;
+      const hw = isTransitStreet(w) ? 'residential' : w.tags?.highway;
       return !!hw && hw in ROAD_WIDTH && w.tags?.area !== 'yes' && !w.tags?.tunnel && w.tags?.covered !== 'yes';
     })
+    .map((w) => (isTransitStreet(w) ? { ...w, tags: { ...w.tags, highway: 'residential' } } : w))
     .sort((a, b) => ROAD_WIDTH[b.tags!.highway] - ROAD_WIDTH[a.tags!.highway]);
   for (const w of roads) {
     const t = w.tags!;
@@ -311,6 +323,31 @@ function buildMap(cache: Cache) {
       if (width >= MAIN_ROAD_TILES && kind === 'asphalt') mainRoad.set(c, r, true);
     });
   }
+
+  // Trams: tracks (drawn by the game from the 'tram' object layer), bridge decks, platforms.
+  const tramTracks = els.filter((e): e is OsmWay => e.type === 'way' && tag(e, 'railway') === 'tram' && !tag(e, 'tunnel'));
+  for (const w of tramTracks)
+    if (tag(w, 'bridge'))
+      strokeLine(ground, w.geometry.map(toTile), Math.round(TRAM_BRIDGE_M / METRES_PER_TILE), (c, r) => {
+        if (ground.get(c, r) === 'water') ground.set(c, r, 'paving');
+      });
+  for (const el of els) {
+    const isPlatform = tag(el, 'railway') === 'platform' || tag(el, 'highway') === 'platform' || tag(el, 'public_transport') === 'platform';
+    if (!isPlatform || el.type === 'node') continue;
+    const rings = ringsOf(el);
+    if (rings.length) fillRings(ground, rings, (c, r) => ground.get(c, r) !== 'building' && ground.set(c, r, 'platform'));
+    else if (el.type === 'way') strokeLine(ground, el.geometry.map(toTile), 1, (c, r) => ground.get(c, r) !== 'building' && ground.set(c, r, 'platform'));
+  }
+  // Which tram lines use each track, from the route relations.
+  const linesOfWay = new Map<number, Set<string>>();
+  for (const el of els)
+    if (el.type === 'relation' && tag(el, 'route') === 'tram' && tag(el, 'ref'))
+      for (const m of el.members)
+        if (m.type === 'way') {
+          if (!linesOfWay.has(m.ref)) linesOfWay.set(m.ref, new Set());
+          linesOfWay.get(m.ref)!.add(tag(el, 'ref')!);
+        }
+  const tramStops = els.filter((e): e is OsmNode => e.type === 'node' && tag(e, 'railway') === 'tram_stop' && !!tag(e, 'name'));
 
   // Trees: mapped single trees and tree rows, only on open (non-road) ground.
   // Big 2×2 trees where there's room, a small one otherwise.
@@ -400,6 +437,31 @@ function buildMap(cache: Cache) {
       churches++;
     }
   });
+  // Tram stop signs: next to each stop node, on the nearest platform/sidewalk tile.
+  const signRadius = Math.round(STOP_SIGN_SEARCH_M / METRES_PER_TILE);
+  let signs = 0;
+  for (const stop of tramStops) {
+    const [sx, sy] = toTile(stop);
+    let spot: Vec | undefined;
+    let bestD = Infinity;
+    for (let dr = -signRadius; dr <= signRadius; dr++)
+      for (let dc = -signRadius; dc <= signRadius; dc++) {
+        const c = Math.floor(sx) + dc;
+        const r = Math.floor(sy) + dr;
+        const g = ground.get(c, r);
+        const d = Math.hypot(c + 0.5 - sx, r + 0.5 - sy) - (g === 'platform' ? 2 : 0); // prefer platforms
+        if ((g === 'platform' || g === 'paving') && !trees.get(c, r) && extraDecor.get(c, r) === undefined && d < bestD) {
+          spot = [c, r];
+          bestD = d;
+        }
+      }
+    if (spot) {
+      extraDecor.set(spot[0], spot[1], T.STOP_SIGN);
+      signs++;
+    }
+  }
+  console.log(`Tram: ${tramTracks.length} track ways, ${tramStops.length} stop nodes, ${signs} stop signs`);
+
   const styleCounts: Record<string, number> = {};
   for (const b of buildings) styleCounts[b.style] = (styleCounts[b.style] ?? 0) + 1;
   console.log('Buildings:', Object.entries(styleCounts).map(([k, v]) => `${k} ${v}`).join(', '));
@@ -429,7 +491,10 @@ function buildMap(cache: Cache) {
         else if (ground.get(c, r + 2) !== 'building') id = upperWallId(style);
         else id = roofId(style);
       }
-      else if (g === 'water') id = ground.get(c, r - 1) === 'water' || r === 0 ? T.WATER : T.WATER_SHORE;
+      else if (g === 'platform') {
+        const plat = (dc: number, dr: number) => ground.get(c + dc, r + dr) === 'platform';
+        id = T.PLATFORM + ((plat(0, -1) ? N : 0) | (plat(1, 0) ? E : 0) | (plat(0, 1) ? S : 0) | (plat(-1, 0) ? W : 0));
+      } else if (g === 'water') id = ground.get(c, r - 1) === 'water' || r === 0 ? T.WATER : T.WATER_SHORE;
       else if (g === 'grass') id = hash(c, r, 1) < 0.08 ? T.GRASS_FLOWERS : T.GRASS;
       else id = T.PAVING;
       groundIds[i] = id;
@@ -462,7 +527,20 @@ function buildMap(cache: Cache) {
   const inside = ({ x, y }: { x: number; y: number }) => x >= 0 && y >= 0 && x <= cols * TILE_SIZE && y <= rows * TILE_SIZE;
   const named = streetShapes.filter((st) => st.points.some(inside));
 
-  return { cols, rows, groundIds, decorIds, spawn, rotation, origin, minU, maxV, tileToLatLon, ground, trees, streets: named };
+  const tram = {
+    tracks: tramTracks
+      .map((w) => ({
+        id: w.id,
+        service: tag(w, 'service') ?? '',
+        bridge: !!tag(w, 'bridge'),
+        lines: [...(linesOfWay.get(w.id) ?? [])].sort().join(','),
+        points: w.geometry.map((p) => px(toTile(p))),
+      }))
+      .filter((t) => t.points.some(inside)),
+    stops: tramStops.map((n) => ({ id: n.id, name: tag(n, 'name')!, ...px(toTile(n)) })).filter(inside),
+  };
+
+  return { cols, rows, groundIds, decorIds, spawn, rotation, origin, minU, maxV, tileToLatLon, ground, trees, streets: named, tram };
 }
 
 function findSpawn(ground: Grid<Ground>, mainRoad: Grid<boolean>, cols: number, rows: number) {
@@ -535,8 +613,8 @@ function toTiled(m: ReturnType<typeof buildMap>, cache: Cache) {
     height: m.rows,
     tilewidth: TILE_SIZE,
     tileheight: TILE_SIZE,
-    nextlayerid: 5,
-    nextobjectid: m.streets.length + 2,
+    nextlayerid: 6,
+    nextobjectid: m.streets.length + m.tram.tracks.length + m.tram.stops.length + 2,
     properties: [
       { name: 'attribution', type: 'string', value: cache.attribution },
       { name: 'osmTimestamp', type: 'string', value: cache.features.osm3s?.timestamp_osm_base ?? cache.fetchedAt },
@@ -622,6 +700,53 @@ function toTiled(m: ReturnType<typeof buildMap>, cache: Cache) {
           };
         }),
       },
+      {
+        // Tram tracks (one polyline per track centreline) and stops; the game draws the rails.
+        id: 5,
+        name: 'tram',
+        type: 'objectgroup',
+        draworder: 'topdown',
+        opacity: 1,
+        visible: true,
+        x: 0,
+        y: 0,
+        objects: [
+          ...m.tram.tracks.map((t, i) => {
+            const [o] = t.points;
+            return {
+              id: m.streets.length + 2 + i,
+              name: t.lines ? `Linje ${t.lines}` : t.service || 'track',
+              type: 'track',
+              x: o.x,
+              y: o.y,
+              width: 0,
+              height: 0,
+              rotation: 0,
+              visible: true,
+              polyline: t.points.map((p) => ({ x: Math.round((p.x - o.x) * 10) / 10, y: Math.round((p.y - o.y) * 10) / 10 })),
+              properties: [
+                { name: 'osmId', type: 'int', value: t.id },
+                { name: 'lines', type: 'string', value: t.lines },
+                { name: 'service', type: 'string', value: t.service },
+                { name: 'bridge', type: 'bool', value: t.bridge },
+              ],
+            };
+          }),
+          ...m.tram.stops.map((st, i) => ({
+            id: m.streets.length + m.tram.tracks.length + 2 + i,
+            name: st.name,
+            type: 'stop',
+            x: st.x,
+            y: st.y,
+            width: 0,
+            height: 0,
+            point: true,
+            rotation: 0,
+            visible: true,
+            properties: [{ name: 'osmId', type: 'int', value: st.id }],
+          })),
+        ],
+      },
     ],
   };
 }
@@ -649,6 +774,7 @@ function preview(m: ReturnType<typeof buildMap>): Img {
       return storefront[f] ?? roofColour[f as BuildingStyle];
     }
     const s = surfaceOfTileId(id);
+    if (id >= T.PLATFORM && id < T.PLATFORM + 16) return PALETTE.gold;
     return s === 'asphalt' ? PALETTE.asphalt : s === 'cobble' ? PALETTE.cobble : s === 'grass' ? PALETTE.grass : s === 'water' ? PALETTE.water : PALETTE.paving;
   };
   const img = new Img(m.cols, m.rows);
@@ -658,6 +784,14 @@ function preview(m: ReturnType<typeof buildMap>): Img {
       d === T.STEEPLE ? PALETTE.gold : d === T.CAFE_TABLES ? PALETTE.awningRed : d >= 0 ? PALETTE.tree : colourOf(m.groundIds[i]);
     img.set(i % m.cols, Math.floor(i / m.cols), colour);
   }
+  for (const t of m.tram.tracks)
+    for (let i = 1; i < t.points.length; i++) {
+      const a = t.points[i - 1];
+      const b = t.points[i];
+      const steps = Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / 4);
+      for (let k = 0; k <= steps; k++)
+        img.set(Math.floor((a.x + ((b.x - a.x) * k) / steps) / TILE_SIZE), Math.floor((a.y + ((b.y - a.y) * k) / steps) / TILE_SIZE), PALETTE.ink);
+    }
   return img;
 }
 

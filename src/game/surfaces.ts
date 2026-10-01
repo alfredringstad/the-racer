@@ -18,6 +18,12 @@ export interface SurfaceParams {
 
 const SOLID: SurfaceParams = { solid: true, grip: 0, drag: 0, accel: 0, maxSpeed: 0, rumble: 0, label: '' };
 
+/** Tram rails: a bit less grip and a rattle, on top of whatever surface they're set into. */
+export function withRails(s: SurfaceParams): SurfaceParams {
+  return RAILED.get(s) ?? RAILED.set(s, { ...s, grip: s.grip * 0.7, rumble: Math.max(s.rumble, 0.5), label: 'TRAM RAILS' }).get(s)!;
+}
+const RAILED = new Map<SurfaceParams, SurfaceParams>();
+
 export const SURFACES: Record<Surface, SurfaceParams> = {
   asphalt: { solid: false, grip: 11, drag: 0.35, accel: 1.0, maxSpeed: 190, rumble: 0, label: 'ASPHALT' },
   cobble: { solid: false, grip: 6.5, drag: 0.6, accel: 0.85, maxSpeed: 150, rumble: 0.5, label: 'COBBLESTONE' },

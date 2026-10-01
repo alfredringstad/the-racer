@@ -61,9 +61,13 @@ What the script does:
 5. Styles buildings from their OSM tags (residential, church, civic, industrial, commercial) and draws them in
    3/4 view (roof + two facade rows). Restaurant, café, bar and shop nodes get an awning on the nearest visible
    facade, or outdoor tables if there isn't one. Churches get a steeple.
-6. Writes a Tiled-compatible JSON map with `ground` and `decor` tile layers, an `objects` layer (spawn point) and a
-   `streets` layer (named roads as polylines, squares as polygons, used for the street sign in the HUD).
-7. Writes `data/map-preview.png` (one pixel per tile) so you can check the result quickly.
+6. Adds Norrköping's trams: tram tracks (`railway=tram`, with line numbers from the route relations), stops
+   (`railway=tram_stop`) with a stop sign, platforms with a yellow tactile edge, and a deck where tracks cross water
+   on their own bridge. Tram/bus-only streets (`highway=service` with rails or bus lanes) are drivable.
+7. Writes a Tiled-compatible JSON map with `ground` and `decor` tile layers, an `objects` layer (spawn point), a
+   `streets` layer (named roads as polylines, squares as polygons, used for the street sign in the HUD) and a
+   `tram` layer (track centrelines as polylines, stops as points).
+8. Writes `data/map-preview.png` (one pixel per tile) so you can check the result quickly.
 
 Tunables (tile size in metres, margin, road widths, storefront search radius) are at the top of
 `scripts/fetch-map.ts`. Which OSM tags become which building style or storefront is in `scripts/lib/buildings.ts`.
@@ -86,6 +90,11 @@ It only writes files that don't exist yet, so once you've drawn your own art it 
   - row 3: diagonal road edges (asphalt then cobblestone; NE, SE, SW, NW)
   - row 4: roofs, then upper facades, per building style (residential, church, civic, industrial, commercial)
   - row 5: street-level facades: the five styles, then restaurant, café, bar, shop
+  - row 6: tram/bus platforms (neighbour mask, like roads)
+
+  Tram rails aren't tiles. The game draws them as 1px lines from the `tram` layer at true standard gauge, with
+  sleepers where the track isn't set into a street. Colours are `rail`, `railDark` and `sleeper` in
+  `src/game/palette.ts`.
 
   Keep this layout, or update `src/game/tiles.ts`. Every tile has a `name` property in the Tiled tileset.
 - `public/assets/sprites/car.png` — 16×16, facing east (right).
@@ -104,6 +113,7 @@ uses for grip and collision — change it in Tiled's tileset editor to change ho
 | Cobblestone | medium | 150 | slight rumble |
 | Sidewalk / paving | medium | 120 | |
 | Grass | low | 85 | slides a lot |
+| Tram rails | ×0.7 of the surface they're on | — | rattle |
 | Building, water, tree | — | — | solid |
 
 Speeds are in px/s. The HUD converts them to km/h using the map's `metresPerTile`. Values are in

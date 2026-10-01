@@ -6,11 +6,19 @@ import { FONT, fontSafe } from '../game/font';
 import { PALETTE } from '../game/palette';
 import { TILE_SIZE } from '../game/tiles';
 import { StreetIndex } from '../game/StreetIndex';
+import { TramNetwork } from '../game/TramNetwork';
 
 const SKID_POOL = 600;
 const SKID_SLIP = 22; // px/s of sideways speed before tyres leave marks
 const LOOKAHEAD = 0.35; // seconds of velocity the camera leads by
 const STREET_LOOKUP_MS = 120;
+const STOP_RADIUS = 72; // px from a tram stop node at which the sign shows the stop instead
+
+type SignKind = 'street' | 'stop';
+const SIGN_STYLE: Record<SignKind, { bg: number; text: number }> = {
+  street: { bg: PALETTE.signBlue, text: PALETTE.uiText }, // Swedish street sign
+  stop: { bg: PALETTE.gold, text: PALETTE.ink }, // tram stop
+};
 
 export class RaceScene extends Phaser.Scene {
   private track!: TrackMap;
@@ -26,6 +34,7 @@ export class RaceScene extends Phaser.Scene {
   private signText!: Phaser.GameObjects.BitmapText;
   private signBg!: Phaser.GameObjects.Image;
   private signBorder!: Phaser.GameObjects.Image;
+  private tram!: TramNetwork;
   private streetName: string | undefined;
   private nextStreetLookup = 0;
 
@@ -37,6 +46,10 @@ export class RaceScene extends Phaser.Scene {
     const mapData = this.cache.json.get('norrkoping') as TiledMap;
     this.track = new TrackMap(this, mapData);
     this.streets = new StreetIndex(mapData);
+    this.tram = new TramNetwork(mapData, this.track.metresPerTile, (x, y) => this.track.surfaceAt(x, y));
+    this.track.railTiles = this.tram.railTiles;
+    this.track.chunkOverlay = (key, x, y, w, h) => this.tram.drawChunk(this, key, x, y, w, h);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.track.destroy());
     this.streetName = undefined;
     this.skids = [];
     this.skidIndex = 0;
@@ -91,14 +104,16 @@ export class RaceScene extends Phaser.Scene {
     this.sign = this.add.container(0, -20, [this.signBorder, this.signBg, this.signText]).setScrollFactor(0).setDepth(100);
   }
 
-  private setStreet(name: string | undefined) {
-    if (name === this.streetName) return;
-    this.streetName = name;
+  private setStreet(name: string | undefined, kind: SignKind = 'street') {
+    const id = name && `${kind}:${name}`;
+    if (id === this.streetName) return;
+    this.streetName = id;
     const { width } = this.scale;
     this.tweens.killTweensOf(this.sign);
     const show = () => {
       if (!name) return;
-      this.signText.setText(fontSafe(name));
+      this.signText.setText(fontSafe(name)).setTint(SIGN_STYLE[kind].text);
+      this.signBg.setTint(SIGN_STYLE[kind].bg);
       const w = this.signText.width + 8;
       const h = FONT.cellHeight + 5;
       this.signBorder.setDisplaySize(w, h);
@@ -132,7 +147,10 @@ export class RaceScene extends Phaser.Scene {
 
     if (time >= this.nextStreetLookup) {
       this.nextStreetLookup = time + STREET_LOOKUP_MS;
-      this.setStreet(this.streets.at(car.x, car.y));
+      const stop = this.tram.stopNear(car.x, car.y, STOP_RADIUS);
+      const street = this.streets.at(car.x, car.y);
+      if (stop) this.setStreet(stop.name, 'stop');
+      else this.setStreet(street);
     }
   }
 

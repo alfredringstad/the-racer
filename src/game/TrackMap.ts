@@ -58,7 +58,11 @@ export class TrackMap {
   private readonly decor: number[];
   private readonly firstgid: number;
   private readonly surfaces: Uint8Array;
-  private readonly chunks = new Map<string, Phaser.Tilemaps.Tilemap>();
+  private readonly chunks = new Map<string, { map: Phaser.Tilemaps.Tilemap; overlay?: Phaser.GameObjects.Image }>();
+  /** 1 where tram rails cross the tile (set by TramNetwork). */
+  railTiles?: Uint8Array;
+  /** Optional extra layer drawn per chunk (e.g. tram rails): returns an image using texture `key`, or nothing. */
+  chunkOverlay?: (key: string, x: number, y: number, w: number, h: number) => Phaser.GameObjects.Image | undefined;
 
   constructor(
     private readonly scene: Phaser.Scene,
@@ -103,6 +107,12 @@ export class TrackMap {
     return SURFACE_LIST[this.surfaces[r * this.width + c]];
   }
 
+  onRailsAt(x: number, y: number) {
+    const c = Math.floor(x / TILE_SIZE);
+    const r = Math.floor(y / TILE_SIZE);
+    return !!this.railTiles && c >= 0 && r >= 0 && c < this.width && r < this.height && this.railTiles[r * this.width + c] === 1;
+  }
+
   isSolidAt(x: number, y: number) {
     return SURFACES[this.surfaceAt(x, y)].solid;
   }
@@ -120,13 +130,25 @@ export class TrackMap {
     const r0 = Math.max(0, Math.floor((view.y - margin) / CHUNK_PX));
     const r1 = Math.min(Math.ceil(this.height / CHUNK) - 1, Math.floor((view.bottom + margin) / CHUNK_PX));
     for (let cy = r0; cy <= r1; cy++) for (let cx = c0; cx <= c1; cx++) if (!this.chunks.has(`${cx},${cy}`)) this.buildChunk(cx, cy);
-    for (const [key, map] of this.chunks) {
+    for (const [key, chunk] of this.chunks) {
       const [cx, cy] = key.split(',').map(Number);
-      if (cx < c0 - 1 || cx > c1 + 1 || cy < r0 - 1 || cy > r1 + 1) {
-        map.destroy();
-        this.chunks.delete(key);
-      }
+      if (cx < c0 - 1 || cx > c1 + 1 || cy < r0 - 1 || cy > r1 + 1) this.destroyChunk(key, chunk);
     }
+  }
+
+  /** Removes every chunk (call before the scene restarts so overlay textures are freed). */
+  destroy() {
+    for (const [key, chunk] of this.chunks) this.destroyChunk(key, chunk);
+  }
+
+  private destroyChunk(key: string, chunk: { map: Phaser.Tilemaps.Tilemap; overlay?: Phaser.GameObjects.Image }) {
+    chunk.map.destroy();
+    if (chunk.overlay) {
+      const tex = chunk.overlay.texture.key;
+      chunk.overlay.destroy();
+      this.scene.textures.remove(tex);
+    }
+    this.chunks.delete(key);
   }
 
   private buildChunk(cx: number, cy: number) {
@@ -142,6 +164,7 @@ export class TrackMap {
         if (this.ground[i] > 0) ground.putTileAt(this.ground[i], c, r);
         if (this.decor[i] > 0) decor.putTileAt(this.decor[i], c, r);
       }
-    this.chunks.set(`${cx},${cy}`, map);
+    const overlay = this.chunkOverlay?.(`chunk-overlay-${cx}-${cy}`, cx * CHUNK_PX, cy * CHUNK_PX, w * TILE_SIZE, h * TILE_SIZE);
+    this.chunks.set(`${cx},${cy}`, { map, overlay });
   }
 }

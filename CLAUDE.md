@@ -41,6 +41,10 @@ src/game/                   Car physics, TrackMap (chunked rendering), StreetInd
 - Buildings are drawn in 3/4 view: the bottom row is the street-level facade, the row above is the upper facade, and the rest is roof.
   Style comes from `scripts/lib/buildings.ts`. POI nodes put storefront facades on the nearest south-facing facade
   (`STOREFRONT_SEARCH_M`) or outdoor tables. Churches get a steeple decor tile.
+- Trams: `railway=tram` ways go into the `tram` object layer as polylines (props `lines`, `service`, `bridge`,
+  `osmId`) and `railway=tram_stop` nodes as points. Platforms (`railway/highway/public_transport=platform`) are a
+  ground kind with their own autotile row. Stop-sign decor goes on the nearest platform or sidewalk. Tracks with
+  `bridge=yes` get a paving deck over water. `highway=service` streets with rails or bus lanes are drawn as residential streets.
 - The `streets` object layer holds named roads (polylines with `widthPx`) and squares (polygons). `StreetIndex` uses
   it for the HUD street sign.
 - Overpass mirrors sometimes return 504 or an HTML "too busy" page. The client falls back across mirrors.
@@ -49,6 +53,10 @@ src/game/                   Car physics, TrackMap (chunked rendering), StreetInd
 ## Rendering
 `TrackMap` parses the Tiled JSON itself (loaded with `load.json`, not `tilemapTiledJSON`) and builds small
 32×32-tile Phaser tilemaps around the camera on demand. A single ~650×650 tilemap would be ~850k `Tile` objects.
+
+`TramNetwork` draws rails per chunk into a CanvasTexture with Bresenham lines (offset ±gauge/2 from the
+centreline, mitred), via `TrackMap.chunkOverlay`. `TrackMap.destroy()` frees those textures and runs on scene
+shutdown. Restarting without it fails on duplicate texture keys. `railTiles` reduces grip (`withRails`).
 
 ## Tile indices are a contract
 `src/game/tiles.ts` is imported by both the generator scripts and the game. Road tile id = base + 4-bit mask

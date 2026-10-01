@@ -359,6 +359,33 @@ function steeple(t: TileCtx) {
   t.pattern(6, 5, ['.#.', '###', '.#.', '.#.'], { '#': P.gold });
 }
 
+/** Raised platform: concrete slabs with a yellow tactile strip along open edges. */
+function platform(t: TileCtx, mask: number) {
+  t.rect(0, 0, S16, S16, P.concrete);
+  for (let i = 0; i < S16; i += 8) {
+    t.rect(i, 0, 1, S16, P.concreteDark);
+    t.rect(0, i, S16, 1, P.concreteDark);
+  }
+  const edge = (side: number, x: number, y: number, w: number, h: number) => {
+    if (mask & side) return;
+    t.rect(x, y, w, h, P.gold);
+    for (let i = 0; i < S16; i += 2) t.px(w === S16 ? i : x + (side === W ? 0 : 1), h === S16 ? i : y + (side === N ? 0 : 1), P.lane);
+  };
+  edge(N, 0, 1, S16, 2);
+  edge(S, 0, 13, S16, 2);
+  edge(W, 1, 0, 2, S16);
+  edge(E, 13, 0, 2, S16);
+  // curb drop shadow on the south side so platforms read as raised
+  if (!(mask & S)) t.rect(0, 15, S16, 1, P.shadow);
+}
+
+function stopSign(t: TileCtx) {
+  // Pole with a round yellow sign and a green tram glyph; small shadow at the foot.
+  t.rect(7, 6, 2, 9, P.railDark);
+  t.rect(6, 15, 4, 1, P.shadow);
+  t.pattern(4, 0, ['.####.', '######', '##gg##', '#gggg#', '##gg##', '.####.', '..##..'], { '#': P.gold, g: P.awningGreen });
+}
+
 // ---------------------------------------------------------------------------
 
 function drawTileset(): Img {
@@ -383,6 +410,8 @@ function drawTileset(): Img {
   bigTree(at(T.TREE_TR), 1, 0);
   bigTree(at(T.TREE_BL), 0, 1);
   bigTree(at(T.TREE_BR), 1, 1);
+  stopSign(at(T.STOP_SIGN));
+  for (let mask = 0; mask < 16; mask++) platform(at(T.PLATFORM + mask), mask);
 
   for (let mask = 0; mask < 16; mask++) {
     road(at(T.ROAD_ASPHALT + mask), mask, false);

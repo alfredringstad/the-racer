@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import type { DriveInput } from './input';
-import { SURFACES, type SurfaceParams } from './surfaces';
+import { SURFACES, withRails, type SurfaceParams } from './surfaces';
 import type { TrackMap } from './TrackMap';
 
 // Tuning (px, seconds).
@@ -62,6 +62,7 @@ export class Car {
   update(input: DriveInput, dtMs: number, time: number) {
     const dt = Math.min(dtMs / 1000, 1 / 30);
     this.surface = SURFACES[this.map.surfaceAt(this.x, this.y)];
+    if (this.map.onRailsAt(this.x, this.y)) this.surface = withRails(this.surface);
     const s = this.surface;
 
     const fx = Math.cos(this.heading);

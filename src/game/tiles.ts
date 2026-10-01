@@ -8,11 +8,12 @@
 //   row 3 : diagonal road edges, id = ROAD_*_DIAG + DIAG_INDEX[mask] (asphalt 48–51, cobble 52–55)
 //   row 4 : roofs (64 + style) and upper facades (72 + style)
 //   row 5 : lower facades / storefronts (80 + facade)
+//   row 6 : tram/bus platforms, id = PLATFORM + mask (yellow tactile edge where the mask bit is unset)
 // Road mask is a 4-bit neighbour mask: N=1, E=2, S=4, W=8 (bit set = road continues that way).
 
 export const TILE_SIZE = 16;
 export const TILESET_COLUMNS = 16;
-export const TILESET_ROWS = 6;
+export const TILESET_ROWS = 7;
 
 export const N = 1;
 export const E = 2;
@@ -32,6 +33,7 @@ export const T = {
   TREE_TR: 9,
   TREE_BL: 10,
   TREE_BR: 11,
+  STOP_SIGN: 12, // decor, tram stop sign; not solid
   ROAD_ASPHALT: 16,
   ROAD_COBBLE: 32,
   ROAD_ASPHALT_DIAG: 48,
@@ -39,6 +41,7 @@ export const T = {
   ROOF: 64,
   WALL_UPPER: 72,
   WALL_LOWER: 80,
+  PLATFORM: 96,
 } as const;
 
 /** Outer-corner road masks get a diagonal curb instead of a square corner. */
@@ -66,6 +69,7 @@ export function surfaceOfTileId(id: number): Surface | undefined {
   if (inRange(id, T.ROAD_COBBLE, 16) || inRange(id, T.ROAD_COBBLE_DIAG, 4)) return 'cobble';
   if (inRange(id, T.ROOF, BUILDING_STYLES.length) || inRange(id, T.WALL_UPPER, BUILDING_STYLES.length)) return 'building';
   if (inRange(id, T.WALL_LOWER, FACADES.length)) return 'building';
+  if (inRange(id, T.PLATFORM, 16)) return 'paving';
   switch (id) {
     case T.GRASS:
     case T.GRASS_FLOWERS:
@@ -97,6 +101,7 @@ export function tileName(id: number): string | undefined {
   if (inRange(id, T.ROOF, BUILDING_STYLES.length)) return `roof-${BUILDING_STYLES[id - T.ROOF]}`;
   if (inRange(id, T.WALL_UPPER, BUILDING_STYLES.length)) return `wall-upper-${BUILDING_STYLES[id - T.WALL_UPPER]}`;
   if (inRange(id, T.WALL_LOWER, FACADES.length)) return `wall-lower-${FACADES[id - T.WALL_LOWER]}`;
+  if (inRange(id, T.PLATFORM, 16)) return `platform-${id - T.PLATFORM}`;
   return named?.toLowerCase().replace(/_/g, '-');
 }
 
