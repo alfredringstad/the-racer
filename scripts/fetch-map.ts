@@ -274,6 +274,9 @@ function buildMap(cache: Cache) {
   }
   for (const el of els)
     if (tag(el, 'natural') === 'water' || tag(el, 'waterway') === 'riverbank') fillArea(el, 'water');
+  // Remember the water before roads and decks are painted over it: those spans are bridges a boat can pass under.
+  const wasWater = new Grid<boolean>(cols, rows, false);
+  ground.cells.forEach((g, i) => (wasWater.cells[i] = g === 'water'));
   for (const el of els) {
     if (underground(el)) continue;
     if (tag(el, 'amenity') === 'parking') fillArea(el, 'asphalt');
@@ -590,7 +593,19 @@ function buildMap(cache: Cache) {
   }
   console.log(`Street lamps: ${lamps.filter((l) => l.source === 'osm').length} mapped, ${lamps.filter((l) => l.source === 'generated').length} generated`);
 
-  return { cols, rows, groundIds, decorIds, spawn, rotation, origin, minU, maxV, tileToLatLon, ground, trees, streets: named, tram, lamps };
+  // Bridges: tiles that were water and are now something you can drive on, as horizontal runs.
+  const bridges: { c: number; r: number; w: number }[] = [];
+  const overWater = (c: number, r: number) => !!wasWater.get(c, r) && ground.get(c, r) !== 'water' && ground.get(c, r) !== 'building';
+  for (let r = 0; r < rows; r++)
+    for (let c = 0; c < cols; c++) {
+      if (!overWater(c, r) || overWater(c - 1, r)) continue;
+      let w = 1;
+      while (overWater(c + w, r)) w++;
+      bridges.push({ c, r, w });
+    }
+  console.log(`Bridges: ${bridges.length} tile runs over water`);
+
+  return { cols, rows, groundIds, decorIds, spawn, rotation, origin, minU, maxV, tileToLatLon, ground, trees, streets: named, tram, lamps, bridges };
 }
 
 function findSpawn(ground: Grid<Ground>, mainRoad: Grid<boolean>, cols: number, rows: number) {
@@ -663,8 +678,8 @@ function toTiled(m: ReturnType<typeof buildMap>, cache: Cache) {
     height: m.rows,
     tilewidth: TILE_SIZE,
     tileheight: TILE_SIZE,
-    nextlayerid: 7,
-    nextobjectid: m.streets.length + m.tram.tracks.length + m.tram.stops.length + m.lamps.length + 2,
+    nextlayerid: 8,
+    nextobjectid: m.streets.length + m.tram.tracks.length + m.tram.stops.length + m.lamps.length + m.bridges.length + 2,
     properties: [
       { name: 'attribution', type: 'string', value: cache.attribution },
       { name: 'osmTimestamp', type: 'string', value: cache.features.osm3s?.timestamp_osm_base ?? cache.fetchedAt },
@@ -819,6 +834,28 @@ function toTiled(m: ReturnType<typeof buildMap>, cache: Cache) {
           rotation: 0,
           visible: true,
           properties: [{ name: 'source', type: 'string', value: l.source }],
+        })),
+      },
+      {
+        // Spans over water (bridges, tram decks) as rectangles: drivable on top, a boat passes underneath.
+        id: 7,
+        name: 'bridges',
+        type: 'objectgroup',
+        draworder: 'topdown',
+        opacity: 1,
+        visible: false,
+        x: 0,
+        y: 0,
+        objects: m.bridges.map((b, i) => ({
+          id: m.streets.length + m.tram.tracks.length + m.tram.stops.length + m.lamps.length + 2 + i,
+          name: '',
+          type: 'bridge',
+          x: b.c * TILE_SIZE,
+          y: b.r * TILE_SIZE,
+          width: b.w * TILE_SIZE,
+          height: TILE_SIZE,
+          rotation: 0,
+          visible: true,
         })),
       },
     ],

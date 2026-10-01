@@ -9,9 +9,11 @@ import { StreetIndex } from '../game/StreetIndex';
 import { TramNetwork } from '../game/TramNetwork';
 import { NightLighting } from '../game/Lighting';
 import { VEHICLES, vehicleById } from '../game/vehicles';
+import { Waterway } from '../game/water';
 
 const SKID_POOL = 600;
 const SKID_SLIP = 22; // px/s of sideways speed before tyres leave marks
+const WAKE_SPEED = 15; // px/s through the water before a boat leaves a wake
 const LOOKAHEAD = 0.35; // seconds of velocity the camera leads by
 const STREET_LOOKUP_MS = 120;
 const STOP_RADIUS = 72; // px from a tram stop node at which the sign shows the stop instead
@@ -61,9 +63,13 @@ export class RaceScene extends Phaser.Scene {
     this.skids = [];
     this.skidIndex = 0;
     this.look.set(0, 0);
-    const spawn = this.track.spawn();
-    this.car = new Car(this, this.track, vehicleById(this.registry.get('vehicle')), spawn.x, spawn.y, spawn.heading);
+    const vehicle = vehicleById(this.registry.get('vehicle'));
+    const water = new Waterway(mapData, this.track);
+    let spawn = this.track.spawn();
+    if (vehicle.onWater) spawn = water.spawnNear(spawn.x, spawn.y) ?? spawn;
+    this.car = new Car(this, this.track, vehicle, spawn.x, spawn.y, spawn.heading);
     this.car.railCrossed = (x0, y0, x1, y1) => this.tram.railCrossed(x0, y0, x1, y1);
+    this.car.water = water;
     this.controls = new Controls(this);
 
     for (let i = 0; i < SKID_POOL; i++)
@@ -167,7 +173,9 @@ export class RaceScene extends Phaser.Scene {
     for (const lamp of this.track.lampSprites) lamp.setDepth(lamp.y > car.y ? 11 : 9.5);
     this.lighting.update(delta, car, input.brake && car.forwardSpeed > 5);
 
-    if (Math.abs(car.slip) > SKID_SLIP || (input.handbrake && car.speed > 30)) this.dropSkids();
+    if (car.spec.wake) {
+      if (Math.abs(car.forwardSpeed) > WAKE_SPEED && !car.underBridge) this.dropWake();
+    } else if (Math.abs(car.slip) > SKID_SLIP || (input.handbrake && car.speed > 30)) this.dropSkids();
 
     const kmh = Math.abs(car.forwardSpeed) * (this.track.metresPerTile / TILE_SIZE) * 3.6;
     this.hudSpeed.setText(String(Math.round(kmh)).padStart(3, '0') + ' KM/H');
@@ -183,6 +191,22 @@ export class RaceScene extends Phaser.Scene {
   }
 
   /** Dark pixels under the rear wheels, recycled from a fixed pool. */
+  /** Light pixels fanning out behind a boat's stern, from the same recycled pool as skid marks. */
+  private dropWake() {
+    const { heading, x, y, spec } = this.car;
+    const c = Math.cos(heading);
+    const s = Math.sin(heading);
+    const back = -spec.halfLength;
+    for (const side of [-1, 1]) {
+      const spread = side * spec.halfWidth * (0.3 + Math.random() * 0.5);
+      const skid = this.skids[this.skidIndex];
+      this.skidIndex = (this.skidIndex + 1) % SKID_POOL;
+      skid.setPosition(Math.round(x + back * c - spread * s), Math.round(y + back * s + spread * c)).setTint(PALETTE.waterLight).setAlpha(0.8).setVisible(true);
+      this.tweens.killTweensOf(skid);
+      this.tweens.add({ targets: skid, alpha: 0, duration: 1500 });
+    }
+  }
+
   private dropSkids() {
     const c = Math.cos(this.car.heading);
     const s = Math.sin(this.car.heading);

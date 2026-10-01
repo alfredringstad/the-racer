@@ -21,6 +21,8 @@ interface TiledObject {
   x: number;
   y: number;
   point?: boolean;
+  width?: number;
+  height?: number;
   polyline?: { x: number; y: number }[];
   polygon?: { x: number; y: number }[];
   properties?: TiledProperty[];

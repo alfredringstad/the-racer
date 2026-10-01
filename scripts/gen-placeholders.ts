@@ -565,6 +565,32 @@ function drawScooter(): Img {
   return img;
 }
 
+/** Small motorboat facing east: pointed bow, wooden cockpit behind a windscreen, outboard motor on the stern. */
+function drawBoat(): Img {
+  const img = new Img(16, 16);
+  const side = '..kwwwwwwwwkk...';
+  const mid = '.mkwddddgwwwwk..';
+  img.pattern(0, 0, [
+    '................',
+    '................',
+    '................',
+    '................',
+    '................',
+    '...kkkkkkkk.....',
+    side,
+    mid,
+    mid,
+    side,
+    '...kkkkkkkk.....',
+    '................',
+    '................',
+    '................',
+    '................',
+    '................',
+  ], { k: P.ink, w: P.uiText, d: P.wood, g: P.carGlass, m: P.shadow });
+  return img;
+}
+
 /** Facing east (rotation 0 in Phaser). 16x16 with transparent margin. `roof` is columns 5-11 of the cabin rows. */
 function car(colors: { b: number; d: number; y: number }, roof: string): Img {
   const img = new Img(16, 16);
@@ -694,6 +720,7 @@ const outputs: Array<[string, () => Img]> = [
   ['public/assets/sprites/bus.png', drawBus],
   ['public/assets/sprites/epa.png', drawEpa],
   ['public/assets/sprites/scooter.png', drawScooter],
+  ['public/assets/sprites/boat.png', drawBoat],
   ['public/' + FONT.path, drawFont],
   ['public/assets/sprites/street-lamp.png', drawStreetLamp],
   ['public/assets/lights/round.png', () => drawRoundLight(128)],

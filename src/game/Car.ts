@@ -3,6 +3,7 @@ import type { DriveInput } from './input';
 import type { SurfaceParams } from './surfaces';
 import { LAMP_RADIUS, type TrackMap } from './TrackMap';
 import { TILE_SIZE, type Surface } from './tiles';
+import type { Waterway } from './water';
 import { surfacesFor, type VehicleSpec, type VehicleSurfaces } from './vehicles';
 
 /** Default speed loss per axle when mounting a curb (see VehicleSpec.curbLoss). */
@@ -36,6 +37,15 @@ export class Car {
   private readonly axleRaised: [boolean | undefined, boolean | undefined] = [undefined, undefined];
   /** Seconds left lying on the ground after a fall (bike). */
   down = 0;
+  /** Set by the scene for boats: where the water is and which way it flows. */
+  water?: Waterway;
+  /** Boat passing under a bridge: drawn faintly, since the deck is on top. */
+  get underBridge() {
+    return !!this.spec.onWater && this.map.surfaceAt(this.x, this.y) !== 'water';
+  }
+  /** River current (px/s) at the boat, refreshed a few times a second. */
+  private flow = { x: 0, y: 0 };
+  private flowTimer = 0;
   /** Small-wheel wobble meter, 0..1; falls at 1 (see VehicleSpec.roughFall). */
   wobble = 0;
   /** Why we fell, for the HUD. */
@@ -87,8 +97,26 @@ export class Car {
       input = { throttle: false, brake: false, steer: 0, handbrake: false };
     }
     const v = this.spec;
-    this.surface = (this.map.onRailsAt(this.x, this.y) ? this.surfaces.railed : this.surfaces.plain)[this.map.surfaceAt(this.x, this.y)];
+    this.surface = v.onWater
+      ? this.surfaces.plain.water
+      : (this.map.onRailsAt(this.x, this.y) ? this.surfaces.railed : this.surfaces.plain)[this.map.surfaceAt(this.x, this.y)];
     const s = this.surface;
+
+    // Boats: do the physics relative to the moving water, so easing off drifts you downstream.
+    let wx = 0;
+    let wy = 0;
+    if (v.onWater && this.water) {
+      this.flowTimer -= dt;
+      if (this.flowTimer <= 0) {
+        this.flowTimer = 0.25;
+        const f = this.water.flowAt(this.x, this.y);
+        this.flow = { x: f.x * (v.current ?? 0), y: f.y * (v.current ?? 0) };
+      }
+      wx = this.flow.x;
+      wy = this.flow.y;
+      this.vx -= wx;
+      this.vy -= wy;
+    }
 
     const fx = Math.cos(this.heading);
     const fy = Math.sin(this.heading);
@@ -121,8 +149,8 @@ export class Car {
     const turn = input.steer * v.turnRate * authority * Math.sign(vF) * (input.handbrake ? 1.35 : 1) * dt;
     if (turn !== 0 && !this.collides(this.x, this.y, this.heading + turn)) this.heading += turn;
 
-    this.vx = fx * vF + rx * vL;
-    this.vy = fy * vF + ry * vL;
+    this.vx = fx * vF + rx * vL + wx;
+    this.vy = fy * vF + ry * vL + wy;
 
     // Move per axis so we can slide along walls.
     this.impact = 0;
@@ -152,7 +180,7 @@ export class Car {
       }
     }
 
-    this.updateCurbs(dt);
+    if (!v.onWater) this.updateCurbs(dt);
     if (v.roughFall) this.updateWobble(v.roughFall, dt);
     if (v.sway) this.updateSway(v.sway, input.throttle, dt);
     this.syncSprite(time);
@@ -210,6 +238,10 @@ export class Car {
   private collides(x: number, y: number, heading: number) {
     const c = Math.cos(heading);
     const s = Math.sin(heading);
+    if (this.spec.onWater) {
+      const water = this.water;
+      return !water || this.probes.some(([px, py]) => !water.isWater(x + px * c - py * s, y + px * s + py * c));
+    }
     for (const [px, py] of this.probes) if (this.map.isSolidAt(x + px * c - py * s, y + px * s + py * c)) return true;
     // Lamp posts: thin round obstacles, tested against the vehicle's rotated box.
     for (const o of this.map.obstaclesNear(x, y)) {
@@ -224,7 +256,8 @@ export class Car {
     const step = (Math.PI * 2) / SPRITE_ANGLE_STEPS;
     // Lying on the ground: knocked a quarter-turn askew and blinking.
     const angle = Math.round(this.heading / step) * step + (this.down > 0 ? Math.PI / 2 : 0);
-    this.sprite.setAlpha(this.down > 0 && Math.floor(time / 100) % 2 ? 0.4 : 1);
+    this.sprite.setAlpha(this.underBridge ? 0.35 : this.down > 0 && Math.floor(time / 100) % 2 ? 0.4 : 1);
+    this.shadow.setVisible(!this.underBridge);
     // Rumble on rough surfaces, scaled by speed.
     const amp = this.surface.rumble * Math.min(1, this.speed / 60);
     const jx = amp ? Math.round(Math.sin(time * 0.07) * amp) : 0;

@@ -61,6 +61,12 @@ export interface VehicleSpec {
    * `curbSpeed` does it at once.
    */
   roughFall?: { minRumble: number; speed: number; seconds: number; curbSpeed: number };
+  /** Boat: moves only on water (and under bridges); land is solid. Physics act relative to the water. */
+  onWater?: boolean;
+  /** River current at mid-channel (px/s) that carries a boat downstream. */
+  current?: number;
+  /** Leaves a white wake instead of skid marks. */
+  wake?: boolean;
 }
 
 export const CAR: VehicleSpec = {
@@ -237,6 +243,37 @@ export const SCOOTER: VehicleSpec = {
 };
 
 /**
+ * Motorboat on Motala ström: no brakes (only reverse thrust), a lazy rudder that needs water
+ * flowing past it, and the current carries you downstream whenever you ease off.
+ */
+export const BOAT: VehicleSpec = {
+  id: 'boat',
+  name: 'MOTORBOAT',
+  sprite: 'boat',
+  onWater: true,
+  current: 24,
+  wake: true,
+  engine: 90,
+  engineFade: 0.3,
+  brake: 70, // reverse thrust
+  reverseAccel: 50,
+  reverseMax: 35,
+  rolling: 6,
+  turnRate: 1.9,
+  turnFullSpeed: 25,
+  grip: 1,
+  handbrakeGrip: 0.6,
+  bounce: 0.45, // fenders
+  halfLength: 6,
+  halfWidth: 3,
+  skidWheels: [],
+  railGrip: 1,
+  surfaces: {
+    water: { solid: false, grip: 1.4, drag: 0.45, accel: 1, maxSpeed: 110, rumble: 0, label: 'MOTALA STRÖM' },
+  },
+};
+
+/**
  * Draws every vehicle this much bigger, together with everything tied to its size (hitbox,
  * skid wheels, light positions). At 1 the 16px hatchback is about half real size (1 px = 0.14 m).
  * Specs above stay in unscaled sprite pixels.
@@ -255,7 +292,7 @@ function scaled(v: VehicleSpec): VehicleSpec {
   };
 }
 
-export const VEHICLES: readonly VehicleSpec[] = [CAR, EV, BUS, EPA, BIKE, SCOOTER].map(scaled);
+export const VEHICLES: readonly VehicleSpec[] = [CAR, EV, BUS, EPA, BIKE, SCOOTER, BOAT].map(scaled);
 
 export function vehicleById(id: unknown): VehicleSpec {
   return VEHICLES.find((v) => v.id === id) ?? VEHICLES[0];
