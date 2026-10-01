@@ -17,6 +17,8 @@ export interface OsmNode {
 export interface OsmWay {
   type: 'way';
   id: number;
+  /** Node ids, parallel to `geometry` (Overpass `out geom` includes both). */
+  nodes?: number[];
   geometry: LatLon[];
   tags?: Record<string, string>;
 }

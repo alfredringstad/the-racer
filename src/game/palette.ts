@@ -62,6 +62,7 @@ export const PALETTE = {
   awningBlue: 0x4f7fbf,
   lamp: 0xffe9a8,
   signBlue: 0x2f5d9e,
+  paint: 0xf1eee4, // road markings
   rail: 0xd2d5dc, // tram rails (steel)
   railDark: 0x55566a,
   sleeper: 0x7a6250,

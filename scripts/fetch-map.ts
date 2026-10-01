@@ -14,6 +14,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { overpass, type LatLon, type OsmElement, type OsmNode, type OverpassResponse, type OsmWay } from './lib/overpass';
 import { buildingStyle, hasOutdoorSeating, POI_QUERY, poiFacade } from './lib/buildings';
+import { buildMarkings, type Marking } from './lib/markings';
 import { dominantGridAngle, Projection, relationRings, type Vec } from './lib/geo';
 import { fillRings, Grid, samplePolyline, samplePolylineWithDir, strokeLine } from './lib/raster';
 import { Img } from './lib/png';
@@ -122,6 +123,7 @@ function featuresQuery(b: Cache['featuresBbox']) {
   way["place"="square"];
   node["natural"="tree"];${POI_QUERY}
   node["highway"="street_lamp"];
+  node["highway"~"^(crossing|traffic_signals|stop|give_way)$"];
   way["railway"="tram"];
   way["railway"="platform"];
   node["railway"="tram_stop"];
@@ -605,7 +607,20 @@ function buildMap(cache: Cache) {
     }
   console.log(`Bridges: ${bridges.length} tile runs over water`);
 
-  return { cols, rows, groundIds, decorIds, spawn, rotation, origin, minU, maxV, tileToLatLon, ground, trees, streets: named, tram, lamps, bridges };
+  // 7. Road markings, inferred from road tags plus crossing/signal/give-way nodes.
+  const specialNodes = new Map<number, Record<string, string>>();
+  for (const el of els) if (el.type === 'node' && el.tags?.highway) specialNodes.set(el.id, el.tags);
+  const markingRoads = roads
+    .filter((w) => w.nodes?.length === w.geometry.length)
+    .map((w) => ({ id: w.id, nodes: w.nodes!, points: w.geometry.map((p) => px(toTile(p))), tags: w.tags!, widthPx: ROAD_WIDTH[w.tags!.highway] * TILE_SIZE }));
+  const markings = buildMarkings(markingRoads, specialNodes, METRES_PER_TILE / TILE_SIZE).filter((mk) =>
+    mk.kind === 'arrow' ? inside(mk) : mk.points.some(inside),
+  );
+  const markingCounts: Record<string, number> = {};
+  for (const mk of markings) markingCounts[mk.kind] = (markingCounts[mk.kind] ?? 0) + 1;
+  console.log('Road markings:', Object.entries(markingCounts).map(([k, v]) => `${k} ${v}`).join(', '));
+
+  return { cols, rows, groundIds, decorIds, spawn, rotation, origin, minU, maxV, tileToLatLon, ground, trees, streets: named, tram, lamps, bridges, markings };
 }
 
 function findSpawn(ground: Grid<Ground>, mainRoad: Grid<boolean>, cols: number, rows: number) {
@@ -678,8 +693,8 @@ function toTiled(m: ReturnType<typeof buildMap>, cache: Cache) {
     height: m.rows,
     tilewidth: TILE_SIZE,
     tileheight: TILE_SIZE,
-    nextlayerid: 8,
-    nextobjectid: m.streets.length + m.tram.tracks.length + m.tram.stops.length + m.lamps.length + m.bridges.length + 2,
+    nextlayerid: 9,
+    nextobjectid: m.streets.length + m.tram.tracks.length + m.tram.stops.length + m.lamps.length + m.bridges.length + m.markings.length + 2,
     properties: [
       { name: 'attribution', type: 'string', value: cache.attribution },
       { name: 'osmTimestamp', type: 'string', value: cache.features.osm3s?.timestamp_osm_base ?? cache.fetchedAt },
@@ -858,8 +873,54 @@ function toTiled(m: ReturnType<typeof buildMap>, cache: Cache) {
           visible: true,
         })),
       },
+      {
+        // Painted road markings; the game draws them. Lines/stop lines/give-way rows/zebras are polylines,
+        // turn arrows are points (rotation = direction of travel, 0 = east).
+        id: 8,
+        name: 'markings',
+        type: 'objectgroup',
+        draworder: 'topdown',
+        opacity: 1,
+        visible: true,
+        x: 0,
+        y: 0,
+        objects: m.markings.map((mk, i) =>
+          markingObject(mk, m.streets.length + m.tram.tracks.length + m.tram.stops.length + m.lamps.length + m.bridges.length + 2 + i),
+        ),
+      },
     ],
   };
+}
+
+function markingObject(mk: Marking, id: number) {
+  const base = { id, name: '', type: mk.kind, width: 0, height: 0, rotation: 0, visible: true };
+  const r = (v: number) => Math.round(v * 10) / 10;
+  if (mk.kind === 'arrow')
+    return {
+      ...base,
+      x: r(mk.x),
+      y: r(mk.y),
+      point: true,
+      rotation: r((mk.angle * 180) / Math.PI),
+      properties: [{ name: 'turn', type: 'string', value: mk.turn }],
+    };
+  const [o] = mk.points;
+  const props =
+    mk.kind === 'line'
+      ? [
+          { name: 'style', type: 'string', value: mk.style },
+          { name: 'dash', type: 'float', value: r(mk.dash) },
+          { name: 'gap', type: 'float', value: r(mk.gap) },
+        ]
+      : mk.kind === 'stop'
+        ? [{ name: 'width', type: 'float', value: mk.width }]
+        : mk.kind === 'zebra'
+          ? [{ name: 'depth', type: 'float', value: r(mk.depth) }]
+          : [
+              { name: 'towardsX', type: 'float', value: r(mk.towards.x) },
+              { name: 'towardsY', type: 'float', value: r(mk.towards.y) },
+            ];
+  return { ...base, x: r(o.x), y: r(o.y), polyline: mk.points.map((p) => ({ x: r(p.x - o.x), y: r(p.y - o.y) })), properties: props };
 }
 
 /** One pixel per tile, coloured by what's drawn there — a quick sanity check of the whole map. */

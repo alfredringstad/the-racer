@@ -7,6 +7,7 @@ import { PALETTE } from '../game/palette';
 import { TILE_SIZE } from '../game/tiles';
 import { StreetIndex } from '../game/StreetIndex';
 import { TramNetwork } from '../game/TramNetwork';
+import { RoadMarkings } from '../game/RoadMarkings';
 import { NightLighting } from '../game/Lighting';
 import { VEHICLES, vehicleById } from '../game/vehicles';
 import { Waterway } from '../game/water';
@@ -54,6 +55,11 @@ export class RaceScene extends Phaser.Scene {
     this.streets = new StreetIndex(mapData);
     this.tram = new TramNetwork(mapData, this.track.metresPerTile, (x, y) => this.track.surfaceAt(x, y));
     this.track.railTiles = this.tram.railTiles;
+    const markings = new RoadMarkings(mapData);
+    this.track.chunkDecorators.push((key, x, y, w, h) => {
+      const paint = markings.drawChunk(this, key, x, y, w, h);
+      return paint && { objects: [paint], textures: [key] };
+    });
     this.track.chunkDecorators.push((key, x, y, w, h) => {
       const rails = this.tram.drawChunk(this, key, x, y, w, h);
       return rails && { objects: [rails], textures: [key] };

@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { PALETTE, hex } from './palette';
 import type { TiledMap } from './TrackMap';
+import { drawLine as line, drawPolyline as polyline, offsetPolyline as offset, walkPolyline as walk } from './polyline';
 import { TILE_SIZE, type Surface } from './tiles';
 
 /** Standard gauge, in metres. */
@@ -146,26 +147,6 @@ export class TramNetwork {
   }
 }
 
-/** Offsets a polyline sideways by `d` px (positive = right of travel, y down), with mitred joins. */
-function offset(pts: Pt[], d: number): Pt[] {
-  const normal = (a: Pt, b: Pt) => {
-    const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
-    return { x: -(b.y - a.y) / len, y: (b.x - a.x) / len };
-  };
-  return pts.map((p, i) => {
-    const n1 = normal(pts[Math.max(0, i - 1)], pts[Math.max(1, i)]);
-    const n2 = normal(pts[Math.min(i, pts.length - 2)], pts[Math.min(i + 1, pts.length - 1)]);
-    let mx = n1.x + n2.x;
-    let my = n1.y + n2.y;
-    const ml = Math.hypot(mx, my) || 1;
-    mx /= ml;
-    my /= ml;
-    const scale = Math.min(2, 1 / Math.max(0.5, mx * n1.x + my * n1.y)); // clamp very sharp corners
-    return { x: p.x + mx * d * scale, y: p.y + my * d * scale };
-  });
-}
-
-/** Calls `fn` every `step` px along a polyline with the unit direction. */
 function segmentsIntersect(ax: number, ay: number, bx: number, by: number, cx: number, cy: number, dx: number, dy: number) {
   const cross = (px: number, py: number, qx: number, qy: number, rx: number, ry: number) => (qx - px) * (ry - py) - (qy - py) * (rx - px);
   const d1 = cross(cx, cy, dx, dy, ax, ay);
@@ -173,49 +154,4 @@ function segmentsIntersect(ax: number, ay: number, bx: number, by: number, cx: n
   const d3 = cross(ax, ay, bx, by, cx, cy);
   const d4 = cross(ax, ay, bx, by, dx, dy);
   return d1 * d2 < 0 && d3 * d4 < 0;
-}
-
-function walk(pts: Pt[], step: number, fn: (x: number, y: number, dx: number, dy: number) => void) {
-  let carry = 0;
-  for (let i = 1; i < pts.length; i++) {
-    const a = pts[i - 1];
-    const b = pts[i];
-    const len = Math.hypot(b.x - a.x, b.y - a.y);
-    if (!len) continue;
-    const dx = (b.x - a.x) / len;
-    const dy = (b.y - a.y) / len;
-    let d = carry;
-    for (; d < len; d += step) fn(a.x + dx * d, a.y + dy * d, dx, dy);
-    carry = d - len;
-  }
-}
-
-function polyline(pts: Pt[], plot: (x: number, y: number) => void) {
-  for (let i = 1; i < pts.length; i++) line(pts[i - 1].x, pts[i - 1].y, pts[i].x, pts[i].y, plot);
-}
-
-/** Bresenham between rounded endpoints: gap-free 1px lines. */
-function line(ax: number, ay: number, bx: number, by: number, plot: (x: number, y: number) => void) {
-  let x = Math.round(ax);
-  let y = Math.round(ay);
-  const x1 = Math.round(bx);
-  const y1 = Math.round(by);
-  const dx = Math.abs(x1 - x);
-  const dy = -Math.abs(y1 - y);
-  const sx = x < x1 ? 1 : -1;
-  const sy = y < y1 ? 1 : -1;
-  let err = dx + dy;
-  for (;;) {
-    plot(x, y);
-    if (x === x1 && y === y1) break;
-    const e2 = 2 * err;
-    if (e2 >= dy) {
-      err += dy;
-      x += sx;
-    }
-    if (e2 <= dx) {
-      err += dx;
-      y += sy;
-    }
-  }
 }
