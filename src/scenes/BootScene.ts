@@ -20,6 +20,7 @@ export class BootScene extends Phaser.Scene {
     for (const l of ['round', 'small', 'cone']) this.load.image(`light-${l}`, `assets/lights/${l}.png`);
     // Parsed by TrackMap itself (chunked rendering), so it's loaded as plain JSON.
     this.load.json('norrkoping', 'assets/maps/norrkoping.json');
+    this.load.json('norrkoping-height', 'assets/maps/norrkoping-height.json');
   }
 
   create() {

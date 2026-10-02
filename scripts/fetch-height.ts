@@ -1,5 +1,5 @@
 // Samples Lantmäteriet's 1 m ground model ("Markhöjdmodell Nedladdning, grid 1+") onto the map's tile
-// grid and writes data/height.json (committed, so the game works offline) plus a shaded preview.
+// grid and writes public/assets/maps/norrkoping-height.json (committed, so the game works offline) plus a shaded preview.
 //
 //   npm run fetch-height
 //
@@ -20,7 +20,7 @@ import { Img } from './lib/png';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const MAP_FILE = resolve(ROOT, 'public/assets/maps/norrkoping.json');
-const OUT_FILE = resolve(ROOT, 'data/height.json');
+const OUT_FILE = resolve(ROOT, 'public/assets/maps/norrkoping-height.json');
 const PREVIEW_FILE = resolve(ROOT, 'data/height-preview.png');
 const STAC_SEARCH = 'https://api.lantmateriet.se/stac-hojd/v1/search';
 const ATTRIBUTION = 'Height data © Lantmäteriet, CC BY 4.0';

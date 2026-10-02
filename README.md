@@ -97,7 +97,7 @@ CC BY 4.0). The tile search is public, but downloading the heights needs a Geoto
    ```
 
 This reads only the part of each 2.5 km height tile that the map covers, samples it onto the map's tile grid
-(same projection and rotation), and writes `data/height.json` (decimetres, committed so everything works
+(same projection and rotation), and writes `public/assets/maps/norrkoping-height.json` (decimetres, committed so everything works
 offline) plus `data/height-preview.png` (shaded relief). Rerun it after changing the map frame or tile size.
 
 ## Replacing the placeholder art
@@ -164,7 +164,7 @@ Speeds are in px/s. The HUD converts them to km/h using the map's `metresPerTile
 ## Credits and licence
 
 Height data © [Lantmäteriet](https://www.lantmateriet.se/), Markhöjdmodell Nedladdning grid 1+, licensed under
-[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). `data/height.json` is derived from it (resampled to
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). `public/assets/maps/norrkoping-height.json` is derived from it (resampled to
 the map grid).
 
 Map data © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright), available under the

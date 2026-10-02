@@ -8,6 +8,7 @@ import { TILE_SIZE } from '../game/tiles';
 import { StreetIndex } from '../game/StreetIndex';
 import { TramNetwork } from '../game/TramNetwork';
 import { RoadMarkings } from '../game/RoadMarkings';
+import { Terrain, type HeightFile } from '../game/Terrain';
 import { NightLighting } from '../game/Lighting';
 import { VEHICLES, vehicleById } from '../game/vehicles';
 import { Waterway } from '../game/water';
@@ -61,6 +62,16 @@ export class RaceScene extends Phaser.Scene {
     this.streets = new StreetIndex(mapData);
     this.tram = new TramNetwork(mapData, this.track.metresPerTile, (x, y) => this.track.surfaceAt(x, y));
     this.track.railTiles = this.tram.railTiles;
+    const heightData = this.cache.json.get('norrkoping-height') as HeightFile | undefined;
+    const terrain =
+      heightData && heightData.width === this.track.width && heightData.height === this.track.height
+        ? new Terrain(heightData, this.bridgeMask(mapData), this.waterMask())
+        : undefined;
+    if (terrain)
+      this.track.chunkDecorators.push((key, x, y, w, h) => {
+        const shade = terrain.drawChunk(this, key, x, y, w, h, (px, py) => this.track.surfaceAt(px, py));
+        return shade && { objects: [shade], textures: [key] };
+      });
     const markings = new RoadMarkings(mapData);
     this.track.chunkDecorators.push((key, x, y, w, h) => {
       const paint = markings.drawChunk(this, key, x, y, w, h);
@@ -81,6 +92,7 @@ export class RaceScene extends Phaser.Scene {
     if (vehicle.onWater) spawn = water.spawnNear(spawn.x, spawn.y) ?? spawn;
     this.car = new Car(this, this.track, vehicle, spawn.x, spawn.y, spawn.heading);
     this.car.railCrossed = (x0, y0, x1, y1) => this.tram.railCrossed(x0, y0, x1, y1);
+    this.car.terrain = terrain;
     this.car.water = water;
     this.trams = new TramTraffic(this, mapData, NPC_TRAM_LINES);
     this.car.obstacleAt = (x, y) => this.trams.solidAt(x, y);
@@ -120,13 +132,34 @@ export class RaceScene extends Phaser.Scene {
     });
   }
 
+  private waterMask(): Uint8Array {
+    const mask = new Uint8Array(this.track.width * this.track.height);
+    for (let r = 0; r < this.track.height; r++)
+      for (let c = 0; c < this.track.width; c++)
+        mask[r * this.track.width + c] = this.track.surfaceAt(c * TILE_SIZE + 8, r * TILE_SIZE + 8) === 'water' ? 1 : 0;
+    return mask;
+  }
+
+  /** Tiles covered by the map's 'bridges' layer (drivable spans over water). */
+  private bridgeMask(map: TiledMap): Uint8Array {
+    const mask = new Uint8Array(this.track.width * this.track.height);
+    for (const o of map.layers.find((l) => l.name === 'bridges')?.objects ?? []) {
+      const c0 = Math.floor(o.x / TILE_SIZE);
+      const r0 = Math.floor(o.y / TILE_SIZE);
+      const c1 = Math.ceil((o.x + (o.width ?? TILE_SIZE)) / TILE_SIZE);
+      const r1 = Math.ceil((o.y + (o.height ?? TILE_SIZE)) / TILE_SIZE);
+      for (let r = r0; r < r1; r++) for (let c = c0; c < c1; c++) if (c >= 0 && r >= 0 && c < this.track.width && r < this.track.height) mask[r * this.track.width + c] = 1;
+    }
+    return mask;
+  }
+
   private text(x: number, y: number, s: string, color: number = PALETTE.uiText) {
     return this.add.bitmapText(x, y, FONT.key, fontSafe(s)).setTint(color).setScrollFactor(0).setDepth(100);
   }
 
   private createHud() {
     const { width, height } = this.scale;
-    this.add.image(0, 0, 'px').setOrigin(0).setDisplaySize(56, 17).setTint(PALETTE.uiBg).setAlpha(0.75).setScrollFactor(0).setDepth(99);
+    this.add.image(0, 0, 'px').setOrigin(0).setDisplaySize(68, 17).setTint(PALETTE.uiBg).setAlpha(0.75).setScrollFactor(0).setDepth(99);
     this.hudSpeed = this.text(3, 2, '000 KM/H', PALETTE.uiAccent);
     this.hudSurface = this.text(3, 9, '');
 
@@ -201,7 +234,15 @@ export class RaceScene extends Phaser.Scene {
     const kmh = Math.abs(car.forwardSpeed) * (this.track.metresPerTile / TILE_SIZE) * 3.6;
     this.hudSpeed.setText(String(Math.round(kmh)).padStart(3, '0') + ' KM/H');
     this.hudSurface.setText(
-      car.down > 0 ? car.downReason : car.wobble > 0.35 ? 'WOBBLY!' : this.trams.bell ? 'DING DING!' : car.surface.label,
+      car.down > 0
+        ? car.downReason
+        : car.wobble > 0.35
+          ? 'WOBBLY!'
+          : this.trams.bell
+            ? 'DING DING!'
+            : Math.abs(car.grade) >= 0.02
+              ? `${car.surface.label} ${car.grade > 0 ? '+' : '-'}${Math.round(Math.abs(car.grade) * 100)}%`
+              : car.surface.label,
     );
 
     if (time >= this.nextStreetLookup) {

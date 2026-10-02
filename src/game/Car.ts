@@ -3,6 +3,7 @@ import type { DriveInput } from './input';
 import type { SurfaceParams } from './surfaces';
 import { LAMP_RADIUS, type TrackMap } from './TrackMap';
 import { TILE_SIZE, type Surface } from './tiles';
+import type { Terrain } from './Terrain';
 import type { Waterway } from './water';
 import { surfacesFor, type VehicleSpec, type VehicleSurfaces } from './vehicles';
 
@@ -12,6 +13,14 @@ const CURB_LOSS = 0.05;
 const BUMP_TIME = 0.09;
 /** Surfaces that sit a curb's height above the road. */
 const isRaised = (s: Surface) => s === 'paving' || s === 'grass';
+
+/** Slopes are exaggerated this much: real city grades (3–5%) would barely be felt otherwise. */
+const SLOPE_GAIN = 4;
+/**
+ * Grades used by the physics are capped here (about the steepest a real street gets). The drawn roads are
+ * wider than real ones, so their edges sometimes cover retaining walls that the ground model sees as cliffs.
+ */
+const MAX_GRADE = 0.15;
 
 const SPRITE_ANGLE_STEPS = 32; // sprite rotation snaps to this many directions for a crisp retro look
 
@@ -30,6 +39,10 @@ export class Car {
   slip = 0;
   /** Impact speed of a collision this frame, 0 if none. */
   impact = 0;
+  /** Ground heights, for slope physics (set by the scene). */
+  terrain?: Terrain;
+  /** Grade along the direction of travel (rise per metre; +0.05 = 5% uphill), for the HUD. */
+  grade = 0;
   /** Speed at which an axle went over a curb this frame (0 if none), for camera feedback. */
   bump = 0;
   private bumpTimer = 0;
@@ -129,6 +142,15 @@ export class Car {
     const ry = fx;
     let vF = this.vx * fx + this.vy * fy;
     let vL = this.vx * rx + this.vy * ry;
+
+    // Slopes: gravity along the ground pulls you downhill (boats are on flat water).
+    this.grade = 0;
+    if (this.terrain && !v.onWater) {
+      const g = this.terrain.gradientAt(this.x, this.y);
+      this.grade = Phaser.Math.Clamp(g.x * fx + g.y * fy, -MAX_GRADE, MAX_GRADE);
+      const gravityPx = (9.81 * TILE_SIZE) / this.map.metresPerTile; // 1 g in px/s²
+      vF -= gravityPx * SLOPE_GAIN * this.grade * dt;
+    }
 
     // Longitudinal
     const engine = v.engine * s.accel * (1 - v.engineFade * Phaser.Math.Clamp(vF / s.maxSpeed, 0, 1));
