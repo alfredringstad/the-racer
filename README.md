@@ -163,6 +163,10 @@ Speeds are in px/s. The HUD converts them to km/h using the map's `metresPerTile
 
 ## Credits and licence
 
+Height data © [Lantmäteriet](https://www.lantmateriet.se/), Markhöjdmodell Nedladdning grid 1+, licensed under
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). `data/height.json` is derived from it (resampled to
+the map grid).
+
 Map data © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright), available under the
 [Open Database License (ODbL)](https://opendatacommons.org/licenses/odbl/). The generated map and the cached
 Overpass response in this repository are derived from OpenStreetMap data and fall under the ODbL. Attribution is
