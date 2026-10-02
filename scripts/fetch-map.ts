@@ -15,6 +15,8 @@ import { fileURLToPath } from 'node:url';
 import { overpass, type LatLon, type OsmElement, type OsmNode, type OverpassResponse, type OsmWay } from './lib/overpass';
 import { buildingStyle, hasOutdoorSeating, POI_QUERY, poiFacade } from './lib/buildings';
 import { buildMarkings, type Marking } from './lib/markings';
+import { buildSigns, type Sign } from './lib/signs';
+import { signFrame } from '../src/game/signs';
 import { buildTramRoutes } from './lib/tram-routes';
 import { dominantGridAngle, Projection, relationRings, type Vec } from './lib/geo';
 import { fillRings, Grid, samplePolyline, samplePolylineWithDir, strokeLine } from './lib/raster';
@@ -80,6 +82,8 @@ const LAMP_SPACING_M = 24;
 const LAMP_MIN_GAP_M = 11;
 /** How far outside the drawn road edge a generated lamp stands, in metres. */
 const LAMP_CURB_OFFSET_M = 0.9;
+/** Road signs keep at least this far from lamp posts, in metres. */
+const SIGN_LAMP_GAP_M = 1.5;
 /** Spacing of trees along natural=tree_row, in metres. */
 const TREE_ROW_SPACING_M = 7;
 
@@ -639,7 +643,20 @@ function buildMap(cache: Cache) {
   const tramRoutes = buildTramRoutes(els, (p) => px(toTile(p)), inside);
   console.log(`Tram routes: ${tramRoutes.map((r) => `${r.line} (${r.stops.length} stops)`).join(', ')}`);
 
-  return { cols, rows, groundIds, decorIds, spawn, rotation, origin, minU, maxV, tileToLatLon, ground, trees, streets: named, tram, lamps, bridges, markings, tramRoutes };
+  // 9. Road signs, on open ground beside the road and clear of lamp posts.
+  const nearLamp = (x: number, y: number) => {
+    const [gx, gy] = lampKey(x, y).split(',').map(Number);
+    for (let dy = -1; dy <= 1; dy++)
+      for (let dx = -1; dx <= 1; dx++)
+        for (const l of lampGrid.get(`${gx + dx},${gy + dy}`) ?? []) if (Math.hypot(l.x - x, l.y - y) < SIGN_LAMP_GAP_M / METRES_PER_TILE * TILE_SIZE) return true;
+    return false;
+  };
+  const roadSigns = buildSigns(markingRoads, specialNodes, METRES_PER_TILE / TILE_SIZE, (x, y) => inside({ x, y }) && lampSpot(x, y) && !nearLamp(x, y));
+  const signCounts: Record<string, number> = {};
+  for (const sg of roadSigns) signCounts[sg.kind] = (signCounts[sg.kind] ?? 0) + 1;
+  console.log('Road signs:', Object.entries(signCounts).map(([k, v]) => `${k} ${v}`).join(', '));
+
+  return { cols, rows, groundIds, decorIds, spawn, rotation, origin, minU, maxV, tileToLatLon, ground, trees, streets: named, tram, lamps, bridges, markings, tramRoutes, roadSigns };
 }
 
 function findSpawn(ground: Grid<Ground>, mainRoad: Grid<boolean>, cols: number, rows: number) {
@@ -712,8 +729,8 @@ function toTiled(m: ReturnType<typeof buildMap>, cache: Cache) {
     height: m.rows,
     tilewidth: TILE_SIZE,
     tileheight: TILE_SIZE,
-    nextlayerid: 10,
-    nextobjectid: m.streets.length + m.tram.tracks.length + m.tram.stops.length + m.lamps.length + m.bridges.length + m.markings.length + m.tramRoutes.length + 2,
+    nextlayerid: 11,
+    nextobjectid: m.streets.length + m.tram.tracks.length + m.tram.stops.length + m.lamps.length + m.bridges.length + m.markings.length + m.tramRoutes.length + m.roadSigns.length + 2,
     properties: [
       { name: 'attribution', type: 'string', value: cache.attribution },
       { name: 'osmTimestamp', type: 'string', value: cache.features.osm3s?.timestamp_osm_base ?? cache.fetchedAt },
@@ -932,6 +949,35 @@ function toTiled(m: ReturnType<typeof buildMap>, cache: Cache) {
             { name: 'line', type: 'string', value: r.line },
             { name: 'osmId', type: 'int', value: r.osmId },
             { name: 'stops', type: 'string', value: JSON.stringify(r.stops) },
+          ],
+        })),
+      },
+      {
+        // Road signs as points at the foot of the post. 'facing' is the travel direction of the traffic
+        // the sign is for (degrees, 0 = east); 'frame' indexes public/assets/sprites/signs.png.
+        id: 10,
+        name: 'signs',
+        type: 'objectgroup',
+        draworder: 'topdown',
+        opacity: 1,
+        visible: true,
+        x: 0,
+        y: 0,
+        objects: m.roadSigns.map((sg: Sign, i) => ({
+          id: m.streets.length + m.tram.tracks.length + m.tram.stops.length + m.lamps.length + m.bridges.length + m.markings.length + m.tramRoutes.length + 2 + i,
+          name: sg.kind === 'speed' ? `${sg.value} km/h` : sg.kind,
+          type: sg.kind,
+          x: sg.x,
+          y: sg.y,
+          width: 0,
+          height: 0,
+          point: true,
+          rotation: 0,
+          visible: true,
+          properties: [
+            { name: 'frame', type: 'int', value: signFrame(sg.kind, sg.value)! },
+            { name: 'facing', type: 'float', value: Math.round((sg.facing * 180) / Math.PI) },
+            ...(sg.value !== undefined ? [{ name: 'value', type: 'int', value: sg.value }] : []),
           ],
         })),
       },

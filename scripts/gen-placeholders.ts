@@ -28,6 +28,7 @@ import {
   type Facade,
 } from '../src/game/tiles';
 import { FONT, GLYPHS } from '../src/game/font';
+import { SIGN_FOOT_ROW, SIGN_FRAME_COUNT, SIGN_H, SIGN_KINDS, SIGN_W, SPEED_LIMITS, signFrame } from '../src/game/signs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const force = process.argv.includes('--force');
@@ -737,6 +738,92 @@ function drawConeLight(): Img {
   return img;
 }
 
+/** Road signs, Swedish style, front-facing on a post. One frame per kind/speed (see src/game/signs.ts). */
+function drawSigns(): Img {
+  const img = new Img(SIGN_W * SIGN_FRAME_COUNT, SIGN_H);
+  const RED = 0xd23c35;
+  const WHITE = 0xf6f3ea;
+  const YELLOW = 0xf2c52e;
+  const BLUE = 0x2f5d9e;
+  const BLACK = P.ink;
+  const cx = SIGN_W / 2; // plate centre x (between pixels 6 and 7)
+  const cy = 6.5;
+  const frame = (i: number) => {
+    const ox = i * SIGN_W;
+    const set = (x: number, y: number, c: number) => x >= 0 && x < SIGN_W && img.set(ox + x, y, c);
+    // Post and its foot shadow.
+    for (let y = 11; y <= SIGN_FOOT_ROW; y++) {
+      set(6, y, P.railDark);
+      set(7, y, P.shadow);
+    }
+    for (let x = 5; x <= 8; x++) set(x, SIGN_FOOT_ROW + 1, P.shadow);
+    return {
+      set,
+      shape(inside: (dx: number, dy: number) => number | undefined) {
+        for (let y = 0; y < 14; y++)
+          for (let x = 0; x < SIGN_W; x++) {
+            const c = inside(x + 0.5 - cx, y + 0.5 - cy);
+            if (c !== undefined) set(x, y, c);
+          }
+      },
+      text(chars: string, top: number, colour: number) {
+        const w = chars.length * 4 - 1;
+        let x = Math.round(cx - w / 2);
+        for (const ch of chars) {
+          const g = GLYPHS[ch];
+          g.slice(g.length - 5).forEach((row, yy) => [...row].forEach((p, xx) => p === '#' && set(x + xx, top + yy, colour)));
+          x += 4;
+        }
+      },
+    };
+  };
+
+  for (const limit of SPEED_LIMITS) {
+    const f = frame(signFrame('speed', limit)!);
+    f.shape((dx, dy) => {
+      const d = Math.hypot(dx, dy);
+      return d < 4.6 ? WHITE : d < 6.4 ? RED : undefined;
+    });
+    f.text(String(limit), 4, BLACK);
+  }
+  for (const kind of SIGN_KINDS) {
+    const f = frame(signFrame(kind)!);
+    if (kind === 'give_way') {
+      // Point-down triangle, red rim, yellow inside.
+      f.shape((dx, dy) => {
+        const t = (dy + 6) / 12; // 0 at the top edge, 1 at the point
+        if (t < 0 || t > 1) return undefined;
+        const half = 6.5 * (1 - t);
+        if (Math.abs(dx) > half) return undefined;
+        return t < 0.1 || Math.abs(dx) > half - 1.3 ? RED : YELLOW;
+      });
+    } else if (kind === 'stop') {
+      // Octagon (corners clearly cut), thin white rim, and a hint of "STOP" lettering.
+      f.shape((dx, dy) => {
+        const oct = Math.max(Math.abs(dx), Math.abs(dy), (Math.abs(dx) + Math.abs(dy)) / 1.42);
+        return oct < 5.4 ? RED : oct < 6.3 ? WHITE : undefined;
+      });
+      ['##.###.#.##', '#...#.#.#.#', '.#..#.#.##.', '##..#..#.#.'].forEach((row, y) =>
+        [...row].forEach((c, x) => c === '#' && f.set(x + 2, 5 + y, WHITE)),
+      );
+    } else if (kind === 'no_entry') {
+      f.shape((dx, dy) => (Math.hypot(dx, dy) < 6.2 ? (Math.abs(dy) < 1 && Math.abs(dx) < 4 ? WHITE : RED) : undefined));
+    } else if (kind === 'oneway') {
+      f.shape((dx, dy) => (Math.abs(dx) < 5.5 && Math.abs(dy) < 5.5 ? BLUE : undefined));
+      [[6, 2], [7, 2], [5, 3], [6, 3], [7, 3], [8, 3], [4, 4], [5, 4], [6, 4], [7, 4], [8, 4], [9, 4]].forEach(([x, y]) => f.set(x, y, WHITE));
+      for (let y = 5; y <= 10; y++) [6, 7].forEach((x) => f.set(x, y, WHITE));
+    } else if (kind === 'crossing') {
+      f.shape((dx, dy) => (Math.abs(dx) < 5.5 && Math.abs(dy) < 5.5 ? BLUE : undefined));
+      f.shape((dx, dy) => {
+        const t = (5 - dy) / 9; // white triangle, point up
+        return t >= 0 && t <= 1 && Math.abs(dx) <= 4.5 * (1 - t) ? WHITE : undefined;
+      });
+      [[6, 4], [7, 4], [6, 5], [7, 5], [6, 6], [5, 7], [6, 7], [7, 7], [8, 7], [6, 8], [5, 9], [8, 9]].forEach(([x, y]) => f.set(x, y, BLACK));
+    }
+  }
+  return img;
+}
+
 function drawFont(): Img {
   const rows = Math.ceil(FONT.chars.length / FONT.charsPerRow);
   const img = new Img(FONT.charsPerRow * FONT.cellWidth, rows * FONT.cellHeight);
@@ -763,6 +850,7 @@ const outputs: Array<[string, () => Img]> = [
   ['public/assets/sprites/tram-mid.png', () => drawTramSection(false)],
   ['public/' + FONT.path, drawFont],
   ['public/assets/sprites/street-lamp.png', drawStreetLamp],
+  ['public/assets/sprites/signs.png', drawSigns],
   ['public/assets/lights/round.png', () => drawRoundLight(128)],
   ['public/assets/lights/small.png', () => drawRoundLight(24)],
   ['public/assets/lights/cone.png', drawConeLight],

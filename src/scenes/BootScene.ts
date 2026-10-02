@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { FONT } from '../game/font';
+import { SIGN_H, SIGN_W } from '../game/signs';
 import { VEHICLES } from '../game/vehicles';
 
 export class BootScene extends Phaser.Scene {
@@ -12,6 +13,7 @@ export class BootScene extends Phaser.Scene {
     for (const v of VEHICLES) this.load.image(v.sprite, `assets/sprites/${v.sprite}.png`);
     this.load.image(FONT.key, FONT.path);
     this.load.image('street-lamp', 'assets/sprites/street-lamp.png');
+    this.load.spritesheet('signs', 'assets/sprites/signs.png', { frameWidth: SIGN_W, frameHeight: SIGN_H });
     for (const k of ['tram-cab', 'tram-mid']) this.load.image(k, `assets/sprites/${k}.png`);
     for (const l of ['round', 'small', 'cone']) this.load.image(`light-${l}`, `assets/lights/${l}.png`);
     // Parsed by TrackMap itself (chunked rendering), so it's loaded as plain JSON.

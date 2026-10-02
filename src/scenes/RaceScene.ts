@@ -183,7 +183,7 @@ export class RaceScene extends Phaser.Scene {
     else if (car.bump > 20) this.cameras.main.shake(70, Math.min(0.005, car.bump / 40000));
 
     // Lamp posts draw over the car when it's behind (north of) them, under it otherwise.
-    for (const lamp of this.track.lampSprites) lamp.setDepth(lamp.y > car.y ? 11 : 9.5);
+    for (const pole of this.track.poleSprites) pole.setDepth(pole.y > car.y ? 11 : 9.5);
     this.lighting.update(delta, car, input.brake && car.forwardSpeed > 5, this.trams.trams.map((t) => t.lights));
 
     if (car.spec.wake) {

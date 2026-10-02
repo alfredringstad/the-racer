@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { lowerWallId, surfaceOfTileId, TILE_SIZE, upperWallId, type Surface } from './tiles';
 import { PointIndex } from './PointIndex';
+import { SIGN_FOOT_ROW, SIGN_H, SIGN_W } from './signs';
 import { SURFACES } from './surfaces';
 
 const SURFACE_LIST = Object.keys(SURFACES) as Surface[];
@@ -54,7 +55,17 @@ export interface Glow {
   seed: number;
 }
 
-/** Collision radius of a lamp post, px. */
+export interface SignPost {
+  x: number; // foot of the post
+  y: number;
+  frame: number;
+  kind: string;
+  value?: number;
+  /** Travel direction of the traffic the sign is for, radians. */
+  facing: number;
+}
+
+/** Collision radius of a lamp post (and sign post), px. */
 export const LAMP_RADIUS = 1.5;
 
 interface Chunk {
@@ -95,8 +106,9 @@ export class TrackMap {
   readonly chunkDecorators: Array<(key: string, x: number, y: number, w: number, h: number) => ChunkExtras | undefined> = [];
   readonly lamps: PointIndex<Lamp>;
   readonly glows: PointIndex<Glow>;
-  /** Lamp sprites that currently exist (in loaded chunks). */
-  readonly lampSprites = new Set<Phaser.GameObjects.Image>();
+  readonly signs: PointIndex<SignPost>;
+  /** Lamp and sign post sprites that currently exist (in loaded chunks), depth-sorted against vehicles. */
+  readonly poleSprites = new Set<Phaser.GameObjects.Image>();
 
   constructor(
     private readonly scene: Phaser.Scene,
@@ -144,11 +156,21 @@ export class TrackMap {
       else if (windowGids.has(this.ground[i]) && seed < 0.4) glows.push({ x: c * TILE_SIZE + 8, y: r * TILE_SIZE + 9, kind: 'window', seed });
     }
     this.glows = new PointIndex(glows);
+
+    const signs = (data.layers.find((l) => l.name === 'signs')?.objects ?? []).map((o) => ({
+      x: o.x,
+      y: o.y,
+      kind: o.type,
+      frame: prop<number>(o.properties, 'frame') ?? 0,
+      value: prop<number>(o.properties, 'value'),
+      facing: ((prop<number>(o.properties, 'facing') ?? 0) * Math.PI) / 180,
+    }));
+    this.signs = new PointIndex(signs);
   }
 
-  /** Lamp posts close enough to matter for collision at (x, y). */
-  obstaclesNear(x: number, y: number, r = 16): Lamp[] {
-    return this.lamps.query(x - r, y - r, x + r, y + r);
+  /** Lamp and sign posts close enough to matter for collision at (x, y). */
+  obstaclesNear(x: number, y: number, r = 16): { x: number; y: number }[] {
+    return [...this.lamps.query(x - r, y - r, x + r, y + r), ...this.signs.query(x - r, y - r, x + r, y + r)];
   }
 
   layer(name: string): TiledLayer {
@@ -201,7 +223,7 @@ export class TrackMap {
   private destroyChunk(key: string, chunk: Chunk) {
     chunk.map.destroy();
     for (const o of chunk.objects) {
-      this.lampSprites.delete(o as Phaser.GameObjects.Image);
+      this.poleSprites.delete(o as Phaser.GameObjects.Image);
       o.destroy();
     }
     for (const t of chunk.textures) this.scene.textures.remove(t);
@@ -227,7 +249,15 @@ export class TrackMap {
       // Foot of the post (row 21 of the 24px sprite) sits on the map point. Snapped to whole pixels:
       // at a fractional position the post flips by 1px against the tiles as the camera scrolls.
       const sprite = this.scene.add.image(Math.round(lamp.x), Math.round(lamp.y), 'street-lamp').setOrigin(0.5, 21 / 24).setDepth(11);
-      this.lampSprites.add(sprite);
+      this.poleSprites.add(sprite);
+      chunk.objects.push(sprite);
+    }
+    for (const sign of this.signs.query(x0, y0, x0 + w * TILE_SIZE, y0 + h * TILE_SIZE)) {
+      const sprite = this.scene.add
+        .image(Math.round(sign.x), Math.round(sign.y), 'signs', sign.frame)
+        .setOrigin(SIGN_W / 2 / SIGN_W, SIGN_FOOT_ROW / SIGN_H)
+        .setDepth(11);
+      this.poleSprites.add(sprite);
       chunk.objects.push(sprite);
     }
     this.chunkDecorators.forEach((decorate, i) => {
