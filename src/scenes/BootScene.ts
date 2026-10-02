@@ -43,6 +43,8 @@ export class BootScene extends Phaser.Scene {
     px.context.fillRect(0, 0, 1, 1);
     px.refresh();
 
-    this.scene.start('Race');
+    // The race scene runs in attract mode behind the title screen until the player starts.
+    this.scene.start('Race', { attract: true });
+    this.scene.launch('Title');
   }
 }

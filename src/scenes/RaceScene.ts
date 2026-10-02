@@ -15,6 +15,8 @@ import { Waterway } from '../game/water';
 import { TramTraffic } from '../game/Trams';
 import { Crowd } from '../game/People';
 import { CyclistTraffic } from '../game/Cyclists';
+import { pointAlong, polylineLength, type Pt } from '../game/polyline';
+import type { DriveInput } from '../game/input';
 
 const SKID_POOL = 600;
 const SKID_SLIP = 22; // px/s of sideways speed before tyres leave marks
@@ -24,6 +26,10 @@ const WAKE_SPEED = 15; // px/s through the water before a boat leaves a wake
 const LOOKAHEAD = 0.35; // seconds of velocity the camera leads by
 const STREET_LOOKUP_MS = 120;
 const STOP_RADIUS = 72; // px from a tram stop node at which the sign shows the stop instead
+
+/** Attract mode (behind the title screen): the camera glides along a tram line at this speed, px/s. */
+const ATTRACT_SPEED = 28;
+const IDLE_INPUT: DriveInput = { throttle: false, brake: false, steer: 0, handbrake: false };
 
 type SignKind = 'street' | 'stop';
 const SIGN_STYLE: Record<SignKind, { bg: number; text: number }> = {
@@ -53,9 +59,20 @@ export class RaceScene extends Phaser.Scene {
   private trams!: TramTraffic;
   private crowd!: Crowd;
   private cyclists!: CyclistTraffic;
+  /** Running behind the title screen: no player, no HUD, the camera tours the city. */
+  private attract = false;
+  private fadeInOnStart = false;
+  private attractPath: Pt[] = [];
+  private attractDist = 0;
+  private attractDir = 1;
 
   constructor() {
     super('Race');
+  }
+
+  init(data?: { attract?: boolean; fadeIn?: boolean }) {
+    this.attract = !!data?.attract;
+    this.fadeInOnStart = !!data?.fadeIn;
   }
 
   create() {
@@ -133,6 +150,54 @@ export class RaceScene extends Phaser.Scene {
       this.registry.set('vehicle', VEHICLES[(i + 1) % VEHICLES.length].id);
       this.scene.restart();
     });
+
+    if (this.attract) this.startAttractMode(mapData);
+    else if (this.fadeInOnStart) cam.fadeIn(400, 0x2b, 0x2a, 0x3a);
+  }
+
+  /** Hides the player and HUD and points the camera at a tram line to wander along. */
+  private startAttractMode(map: TiledMap) {
+    this.car.sprite.setVisible(false);
+    this.car.shadow.setVisible(false);
+    this.car.x = this.car.y = -1000; // out of the world, so its lights and hitbox stay out of the way
+    for (const o of this.children.list as (Phaser.GameObjects.GameObject & Phaser.GameObjects.Components.ScrollFactor & Phaser.GameObjects.Components.Visible & Phaser.GameObjects.Components.Depth)[])
+      if (o.scrollFactorX === 0 && o.depth >= 99) o.setVisible(false);
+    const cam = this.cameras.main;
+    cam.stopFollow();
+    // The longest tram route, starting from its point nearest the middle of the map.
+    const routes = (map.layers.find((l) => l.name === 'tramRoutes')?.objects ?? [])
+      .filter((o) => o.polyline && o.polyline.length > 1)
+      .map((o) => o.polyline!.map((p) => ({ x: o.x + p.x, y: o.y + p.y })));
+    this.attractPath = routes.sort((a, b) => polylineLength(b) - polylineLength(a))[0] ?? [this.track.spawn()];
+    const mid = { x: this.track.widthPx / 2, y: this.track.heightPx / 2 };
+    let best = Infinity;
+    for (let s = 0; s < polylineLength(this.attractPath); s += 32) {
+      const p = pointAlong(this.attractPath, s);
+      const d = Math.hypot(p.x - mid.x, p.y - mid.y);
+      if (d < best) [best, this.attractDist] = [d, s];
+    }
+    const p = pointAlong(this.attractPath, this.attractDist);
+    cam.centerOn(p.x, p.y);
+  }
+
+  /** Glides the camera back and forth along the attract route. */
+  private updateAttractCamera(delta: number) {
+    const len = polylineLength(this.attractPath);
+    this.attractDist += (this.attractDir * ATTRACT_SPEED * delta) / 1000;
+    if (this.attractDist > len || this.attractDist < 0) {
+      this.attractDir *= -1;
+      this.attractDist = Phaser.Math.Clamp(this.attractDist, 0, len);
+    }
+    const target = pointAlong(this.attractPath, this.attractDist);
+    const cam = this.cameras.main;
+    const k = 1 - Math.exp(-delta / 600); // ease, so corners in the route turn into gentle curves
+    cam.centerOn(cam.midPoint.x + (target.x - cam.midPoint.x) * k, cam.midPoint.y + (target.y - cam.midPoint.y) * k);
+  }
+
+  /** What NPCs treat as the player in attract mode: a still, out-of-the-way stand-in at the view centre. */
+  private attractHazard() {
+    const view = this.cameras.main.worldView;
+    return { x: view.centerX, y: view.centerY, vx: 0, vy: 0, heading: 0, speed: 0, spec: { ...this.car.spec, onWater: true } };
   }
 
   private waterMask(): Uint8Array {
@@ -206,13 +271,15 @@ export class RaceScene extends Phaser.Scene {
 
   update(time: number, delta: number) {
     const car = this.car;
-    const input = this.controls.read();
+    if (this.attract) this.updateAttractCamera(delta);
+    const input = this.attract ? IDLE_INPUT : this.controls.read();
     this.trams.update(delta, car);
     car.update(input, delta, time);
     // Knocking someone over costs a little speed.
     const view = this.cameras.main.worldView;
     const night = this.lighting.night;
-    if (this.crowd.update(delta, view, car, night) + this.cyclists.update(delta, view, car, night) > 0) {
+    const hazard = this.attract ? this.attractHazard() : car;
+    if (this.crowd.update(delta, view, hazard, night) + this.cyclists.update(delta, view, hazard, night) > 0) {
       car.vx *= 0.8;
       car.vy *= 0.8;
     }
