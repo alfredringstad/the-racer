@@ -12,10 +12,24 @@ const NIGHT_COUNT = 3;
 const ACTIVE_RADIUS = 460;
 const DESPAWN_RADIUS = 620;
 
-// Riding (px/s; ~50 px/s is about 25 km/h on the HUD).
-const SPEED_MIN = 40;
-const SPEED_MAX = 56;
+// Riding (px/s; ~50 px/s is about 25 km/h on the HUD). Each rider is one of these types.
+const RIDER_TYPES: readonly { share: number; min: number; max: number }[] = [
+  { share: 0.3, min: 26, max: 36 }, // leisurely
+  { share: 0.5, min: 40, max: 52 }, // commuter
+  { share: 0.2, min: 60, max: 72 }, // fast roadie
+];
 const ACCEL = 35;
+/** Overtaking: how far (px) towards the middle of the road a rider swings out to pass. */
+const PASS_SHIFT = 12;
+/** px/s sideways while swinging out and back in. */
+const PASS_SWING = 18;
+/** Only pass someone at least this much (px/s) slower than you'd like to go. */
+const PASS_MARGIN = 6;
+/** How far ahead (px) the passing lane must be clear of oncoming riders, the player and trams. */
+const PASS_CLEAR = 70;
+/** Pull back in once this far (px) ahead of the rider you passed; give up after this many seconds. */
+const PASS_DONE = 12;
+const PASS_GIVE_UP = 6;
 /** How far from the kerb (px) cyclists ride, on the right-hand side of the road. */
 const KERB_GAP = 10;
 /** Riders ease onto their line at up to this multiple of their speed, which rounds off corners. */
@@ -54,6 +68,10 @@ interface Cyclist {
   heading: number;
   v: number;
   cruise: number;
+  /** The rider being overtaken, and how far (px) we've swung out towards the middle of the road. */
+  passing?: Cyclist;
+  passTime: number;
+  shift: number;
   down: number;
   bell: number;
   pedal: number;
@@ -113,7 +131,7 @@ export class CyclistTraffic {
     const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
     const dx = (b.x - a.x) / len;
     const dy = (b.y - a.y) / len;
-    const off = Math.max(4, st.half - KERB_GAP);
+    const off = Math.max(4, st.half - KERB_GAP) - c.shift;
     // Right of travel on screen (y down) is (-dy, dx).
     return { x: a.x + dx * c.t - dy * off, y: a.y + dy * c.t + dx * off, dx, dy };
   }
@@ -153,13 +171,17 @@ export class CyclistTraffic {
   }
 
   private spawn(cx: number, cy: number, minR: number, maxR: number) {
-    for (let k = 0; k < 10; k++) {
-      const s = Math.floor(this.rand() * this.streets.length);
-      const st = this.streets[s];
-      const i = Math.floor(this.rand() * (st.pts.length - 1));
-      const p = st.pts[i];
-      const d = Math.hypot(p.x - cx, p.y - cy);
-      if (d < minR || d > maxR) continue;
+    // Street points in the ring around the camera (not random streets across the whole map,
+    // which would rarely land near it).
+    const near: Node[] = [];
+    this.streets.forEach((st, s) =>
+      st.pts.forEach((p, i) => {
+        const d = Math.hypot(p.x - cx, p.y - cy);
+        if (i + 1 < st.pts.length && d >= minR && d <= maxR) near.push({ s, i });
+      }),
+    );
+    for (let k = 0; k < 4 && near.length; k++) {
+      const { s, i } = near[Math.floor(this.rand() * near.length)];
       const forward = this.rand() < 0.5;
       const v = Math.floor(this.rand() * CYCLISTS.variants);
       const c: Cyclist = {
@@ -171,7 +193,9 @@ export class CyclistTraffic {
         y: 0,
         heading: 0,
         v: 0,
-        cruise: SPEED_MIN + this.rand() * (SPEED_MAX - SPEED_MIN),
+        cruise: this.cruiseSpeed(),
+        passTime: 0,
+        shift: 0,
         down: 0,
         bell: 0,
         pedal: 0,
@@ -189,6 +213,12 @@ export class CyclistTraffic {
     }
   }
 
+  private cruiseSpeed() {
+    let r = this.rand();
+    const type = RIDER_TYPES.find((t) => (r -= t.share) < 0) ?? RIDER_TYPES[1];
+    return type.min + this.rand() * (type.max - type.min);
+  }
+
   private remove(i: number) {
     this.riders[i].sprite.destroy();
     this.riders[i].shadow.destroy();
@@ -201,7 +231,7 @@ export class CyclistTraffic {
   }
 
   /** Distance to the nearest thing ahead worth braking for (Infinity if clear), and whether it's the player. */
-  private clearance(c: Cyclist, player: CrowdHazard): { d: number; player: boolean } {
+  private clearance(c: Cyclist, player: CrowdHazard): { d: number; player: boolean; rider?: Cyclist } {
     const fx = Math.cos(c.heading);
     const fy = Math.sin(c.heading);
     const pc = Math.cos(player.heading);
@@ -216,7 +246,8 @@ export class CyclistTraffic {
       if (this.trams?.solidAt(x, y, 3)) return { d, player: false };
       // Queue behind riders going the same way; riders crossing our path just weave past
       // (waiting for each other at junctions would deadlock).
-      if (this.riders.some((o) => o !== c && Math.cos(o.heading - c.heading) > 0.5 && Math.hypot(o.x - x, o.y - y) < 5)) return { d, player: false };
+      const rider = this.riders.find((o) => o !== c && Math.cos(o.heading - c.heading) > 0.5 && Math.hypot(o.x - x, o.y - y) < 5);
+      if (rider) return { d, player: false, rider };
       if (this.crowd?.people.some((p) => (p.state === 'cross' || p.state === 'down') && Math.hypot(p.x - x, p.y - 3 - y) < 6)) return { d, player: false };
     }
     return { d: Infinity, player: false };
@@ -273,6 +304,7 @@ export class CyclistTraffic {
       c.bell = BELL_COOLDOWN;
       this.say(c, 'PLING!');
     }
+    this.overtake(c, ahead.rider, player, dt);
     // Slow to a stop a few px short of whatever is ahead.
     const vMax = Math.min(c.cruise, Math.max(0, ahead.d - 8) * 3);
     c.v = c.v < vMax ? Math.min(vMax, c.v + ACCEL * dt) : vMax;
@@ -299,6 +331,50 @@ export class CyclistTraffic {
     if (step > 0.05) c.heading = Math.atan2(dy, dx);
     c.pedal += step;
     return false;
+  }
+
+  /**
+   * Stuck behind a slower rider: swing out towards the middle of the road when the way is clear,
+   * pass, and pull back in once ahead. The lane shift is eased, so it reads as a smooth swerve.
+   */
+  private overtake(c: Cyclist, blocker: Cyclist | undefined, player: CrowdHazard, dt: number) {
+    if (c.passing) {
+      const o = c.passing;
+      c.passTime += dt;
+      // Done once they're behind us (or gone, or it's taking far too long).
+      const along = (o.x - c.x) * Math.cos(c.heading) + (o.y - c.y) * Math.sin(c.heading);
+      if (!this.riders.includes(o) || along < -PASS_DONE || c.passTime > PASS_GIVE_UP) c.passing = undefined;
+    } else if (blocker && blocker.down <= 0 && Math.min(blocker.v, blocker.cruise) < c.cruise - PASS_MARGIN && this.passingLaneClear(c, player)) {
+      c.passing = blocker;
+      c.passTime = 0;
+      if (c.bell <= 0 && this.rand() < 0.5) {
+        c.bell = BELL_COOLDOWN;
+        this.say(c, 'PLING!');
+      }
+    }
+    const want = c.passing ? PASS_SHIFT : 0;
+    c.shift += Phaser.Math.Clamp(want - c.shift, -PASS_SWING * dt, PASS_SWING * dt);
+  }
+
+  /** Is the line PASS_SHIFT px further out clear ahead: no oncoming riders, player or trams? */
+  private passingLaneClear(c: Cyclist, player: CrowdHazard): boolean {
+    const fx = Math.cos(c.heading);
+    const fy = Math.sin(c.heading);
+    // Towards the middle of the road is to the left of travel: (fy, -fx) on screen.
+    const lx = fy * PASS_SHIFT;
+    const ly = -fx * PASS_SHIFT;
+    const pc = Math.cos(player.heading);
+    const ps = Math.sin(player.heading);
+    for (let d = 0; d <= PASS_CLEAR; d += 6) {
+      const x = c.x + lx + fx * d;
+      const y = c.y + ly + fy * d;
+      const rx = x - player.x;
+      const ry = y - player.y;
+      if (!player.spec.onWater && Math.abs(rx * pc + ry * ps) < player.spec.halfLength + 4 && Math.abs(-rx * ps + ry * pc) < player.spec.halfWidth + 4) return false;
+      if (this.trams?.solidAt(x, y, 4)) return false;
+      if (this.riders.some((o) => o !== c && o !== c.passing && Math.hypot(o.x - x, o.y - y) < 8)) return false;
+    }
+    return true;
   }
 
   private draw(c: Cyclist) {
