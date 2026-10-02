@@ -174,7 +174,7 @@ export class RaceScene extends Phaser.Scene {
     this.trams.update(delta, car);
     car.update(input, delta, time);
     // Knocking someone over costs a little speed.
-    if (this.crowd.update(delta, this.cameras.main.worldView, car) > 0) {
+    if (this.crowd.update(delta, this.cameras.main.worldView, car, this.lighting.night) > 0) {
       car.vx *= 0.8;
       car.vy *= 0.8;
     }

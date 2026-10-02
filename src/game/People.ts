@@ -8,6 +8,11 @@ import type { Surface } from './tiles';
 
 /** How many people are kept around the camera, and where they live. */
 const TARGET_COUNT = 40;
+/** At full night: fewer people out, about one waiting per tram stop. */
+const NIGHT_COUNT = 14;
+const NIGHT_WAITERS_PER_STOP = 1;
+/** At night new arrivals turn up near street lamps (within this many px of one). */
+const NIGHT_LAMP_RADIUS = 24;
 const ACTIVE_RADIUS = 420;
 const DESPAWN_RADIUS = 560;
 const WAITERS_PER_STOP = 3;
@@ -113,6 +118,8 @@ export class Crowd {
   private readonly leashes: Phaser.GameObjects.Graphics;
   /** The first fill puts people in view too; it waits until the camera has found the player. */
   private filled = false;
+  /** 0 = day, 1 = night (from the lighting). */
+  private night = 0;
   /** Running totals, for the curious (and tests). */
   readonly stats = { boarded: 0, alighted: 0, bumped: 0 };
 
@@ -153,7 +160,9 @@ export class Crowd {
   private walkable(x: number, y: number) {
     if (this.track.isSolidAt(x, y)) return false;
     if (this.track.obstaclesNear(x, y, 6).some((o) => Math.hypot(o.x - x, o.y - y) < 3)) return false;
-    return WALKABLE.has(this.track.surfaceAt(x, y)) || !!this.zebraAt(x, y);
+    const s = this.track.surfaceAt(x, y);
+    if (s === 'grass' && this.night > 0.5) return false; // parks are empty at night
+    return WALKABLE.has(s) || !!this.zebraAt(x, y);
   }
 
   private add(x: number, y: number, state: State, dir: Pt, stop?: number, sheet: SheetSpec = ADULTS, leader?: Person, slot = 1) {
@@ -194,8 +203,13 @@ export class Crowd {
    * two kids running about on their own. Returns the leader.
    */
   private addGroup(x: number, y: number, state: State, dir: Pt, stop?: number): Person {
+    // Kids are home at night; dogs still get their evening walk.
+    const n = this.night;
+    const gang = KID_GANG_CHANCE * (1 - n);
+    const dog = DOG_CHANCE * (1 - 0.3 * n);
+    const family = FAMILY_CHANCE * (1 - 0.95 * n);
     const r = this.rand();
-    if (r < KID_GANG_CHANCE && state === 'walk') {
+    if (r < gang && state === 'walk') {
       const a = this.add(x, y, 'walk', dir, undefined, KIDS);
       a.speed = KID_RUN_MIN + this.rand() * (KID_RUN_MAX - KID_RUN_MIN);
       const b = this.add(x, y, 'follow', dir, undefined, KIDS, a);
@@ -203,8 +217,8 @@ export class Crowd {
       return a;
     }
     const p = this.add(x, y, state, dir, stop);
-    if (r < KID_GANG_CHANCE + DOG_CHANCE) this.add(x, y, 'follow', dir, undefined, DOGS, p);
-    else if (r < KID_GANG_CHANCE + DOG_CHANCE + FAMILY_CHANCE) {
+    if (r < gang + dog) this.add(x, y, 'follow', dir, undefined, DOGS, p);
+    else if (r < gang + dog + family) {
       p.speed = WALK_MIN; // strolling at kid pace
       const n = this.rand() < 0.35 ? 2 : 1;
       for (let k = 1; k <= n; k++) this.add(x, y, 'follow', dir, undefined, KIDS, p, k).side = 1;
@@ -225,13 +239,21 @@ export class Crowd {
     this.scene.tweens.add({ targets: t, y: t.y - 6, alpha: 0, delay: 350, duration: 650, onComplete: () => t.destroy() });
   }
 
-  /** Random walkable spot in a ring around (cx, cy), outside `minR`. */
+  /** Random walkable spot in a ring around (cx, cy), outside `minR`. At night, close to a street lamp. */
   private spot(cx: number, cy: number, minR: number, maxR: number): Pt | undefined {
+    const lamps = this.rand() < this.night ? this.track.lamps.query(cx - maxR, cy - maxR, cx + maxR, cy + maxR) : [];
     for (let i = 0; i < 12; i++) {
       const a = this.rand() * Math.PI * 2;
-      const r = minR + this.rand() * (maxR - minR);
-      const x = Math.round(cx + Math.cos(a) * r);
-      const y = Math.round(cy + Math.sin(a) * r);
+      let r = minR + this.rand() * (maxR - minR);
+      let [ox, oy] = [cx, cy];
+      if (lamps.length) {
+        const l = lamps[Math.floor(this.rand() * lamps.length)];
+        if (Math.hypot(l.x - cx, l.y - cy) < minR) continue;
+        [ox, oy] = [l.x, l.y];
+        r = this.rand() * NIGHT_LAMP_RADIUS;
+      }
+      const x = Math.round(ox + Math.cos(a) * r);
+      const y = Math.round(oy + Math.sin(a) * r);
       const s = this.track.surfaceAt(x, y);
       if (!this.walkable(x, y) || this.zebraAt(x, y)) continue;
       if (s === 'grass' && this.rand() > 0.3) continue; // mostly on sidewalks and squares
@@ -244,8 +266,10 @@ export class Crowd {
     return DIRS.filter((d) => this.walkable(p.x + d.x * ahead, p.y + d.y * ahead));
   }
 
-  update(dtMs: number, view: Phaser.Geom.Rectangle, hazard: CrowdHazard): number {
+  update(dtMs: number, view: Phaser.Geom.Rectangle, hazard: CrowdHazard, night = 0): number {
     const dt = Math.min(dtMs / 1000, 1 / 20);
+    this.night = night;
+    const target = Math.round(TARGET_COUNT + (NIGHT_COUNT - TARGET_COUNT) * night);
     const cx = view.centerX;
     const cy = view.centerY;
     const offscreen = Math.hypot(view.width, view.height) / 2 + 12;
@@ -254,10 +278,12 @@ export class Crowd {
     const first = !this.filled && view.contains(hazard.x, hazard.y);
     if (first) this.filled = true;
     if (!this.filled) return 0;
-    for (let n = 0; n < (first ? TARGET_COUNT : 2) && this.people.length < TARGET_COUNT; n++) {
+    for (let n = 0; n < (first ? target : 2) && this.people.length < target; n++) {
       const s = this.spot(cx, cy, first ? 0 : offscreen, ACTIVE_RADIUS);
       if (s) this.addGroup(s.x, s.y, 'walk', DIRS[Math.floor(this.rand() * 4)]);
     }
+    if (this.people.length > target + 2) this.sendHome(view, offscreen, false);
+    else if (night > 0.6) this.sendHome(view, offscreen, true); // past bedtime
     this.fillStops(dt, cx, cy, view, first);
     this.unloadTrams(cx, cy);
 
@@ -277,13 +303,33 @@ export class Crowd {
     return bumps;
   }
 
+  private get waitersPerStop() {
+    return Math.round(WAITERS_PER_STOP + (NIGHT_WAITERS_PER_STOP - WAITERS_PER_STOP) * this.night);
+  }
+
+  /**
+   * Too many people out for the time of day: one group out of sight goes home (it's removed).
+   * Kids go first as it gets dark; with `kidsOnly`, only groups with kids go.
+   */
+  private sendHome(view: Phaser.Geom.Rectangle, offscreen: number, kidsOnly: boolean) {
+    const cx = view.centerX;
+    const cy = view.centerY;
+    const hidden = (p: Person) => !view.contains(p.x, p.y) && Math.hypot(p.x - cx, p.y - cy) > offscreen;
+    const leaders = this.people.filter((p) => !p.leader && p.state !== 'board' && hidden(p) && this.people.every((f) => f.leader !== p || hidden(f)));
+    if (!leaders.length) return;
+    const withKids = (p: Person) => p.kind === 'kid' || this.people.some((f) => f.leader === p && f.kind === 'kid');
+    const pick = (this.night > 0.3 && leaders.find(withKids)) || (kidsOnly ? undefined : leaders[Math.floor(this.rand() * leaders.length)]);
+    if (!pick) return;
+    for (let i = this.people.length - 1; i >= 0; i--) if (this.people[i] === pick || this.people[i].leader === pick) this.remove(i);
+  }
+
   /** People waiting at tram stops near the camera; refilled out of sight after a tram has been. */
   private fillStops(dt: number, cx: number, cy: number, view: Phaser.Geom.Rectangle, first: boolean) {
     this.stops.forEach((s, i) => {
       s.refill = Math.max(0, s.refill - dt);
       if (s.refill > 0 || Math.hypot(s.x - cx, s.y - cy) > ACTIVE_RADIUS || (!first && view.contains(s.x, s.y))) return;
       let waiting = this.people.filter((p) => p.stop === i).length;
-      for (let k = 0; k < 8 && waiting < WAITERS_PER_STOP; k++) {
+      for (let k = 0; k < 8 && waiting < this.waitersPerStop; k++) {
         const a = this.rand() * Math.PI * 2;
         const r = 6 + this.rand() * 14;
         const x = Math.round(s.x + Math.cos(a) * r);
@@ -477,7 +523,7 @@ export class Crowd {
         // Walking past a tram stop that isn't full: sometimes stop and wait for a tram.
         if (p.stop === undefined && this.rand() < JOIN_STOP_CHANCE * dt) {
           const i = this.stops.findIndex((s) => Math.hypot(s.x - p.x, s.y - p.y) < JOIN_STOP_RADIUS);
-          if (i >= 0 && this.people.filter((q) => q.stop === i).length < WAITERS_PER_STOP) {
+          if (i >= 0 && this.people.filter((q) => q.stop === i).length < this.waitersPerStop) {
             p.state = 'wait';
             p.stop = i;
             p.timer = 2 + this.rand() * 4;
