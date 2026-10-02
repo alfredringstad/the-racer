@@ -100,6 +100,19 @@ snapshots the target's rule and OSM ids, and stores positions as lat/lon, so edi
 tile size or map frame. Edits whose target is no longer generated (for example because OSM changed) are
 reported as *orphaned* when the map is rebuilt.
 
+```bash
+npm run analyze-edits
+```
+
+prints a report on the log:
+- **Correction rate per generator rule:** how many features each rule produced, and how many you
+  corrected, by operation and reason.
+- **Tag patterns:** for rules with 5+ corrections, OSM tags that are statistically over-represented among the
+  corrected features compared with everything the rule produced (e.g. "`lanes=(none)` on 100% of deleted centre
+  lines vs 76% of all"). That's the hint for a better rule, or for which tags are missing in OSM.
+- **Possible OpenStreetMap issues:** corrections to features mapped directly in OSM, with links to fix them
+  upstream.
+
 ## Height data (optional)
 
 Terrain heights come from Lantmäteriet's 1 m ground model ("Markhöjdmodell Nedladdning, grid 1+", free,

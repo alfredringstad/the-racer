@@ -11,7 +11,8 @@
     "fetch-map": "tsx scripts/fetch-map.ts",
     "gen-placeholders": "tsx scripts/gen-placeholders.ts",
     "fetch-height": "tsx scripts/fetch-height.ts",
-    "editor": "vite --open /editor.html"
+    "editor": "vite --open /editor.html",
+    "analyze-edits": "tsx scripts/analyze-edits.ts"
   },
   "dependencies": {
     "phaser": "^4.2.1"
