@@ -12,6 +12,7 @@ import { Terrain, type HeightFile } from '../game/Terrain';
 import { NightLighting } from '../game/Lighting';
 import { VEHICLES, vehicleById } from '../game/vehicles';
 import { Waterway } from '../game/water';
+import { latLonToPx, START_PLACES, type StartPlace } from '../game/spawns';
 import { TramTraffic } from '../game/Trams';
 import { Crowd } from '../game/People';
 import { CyclistTraffic } from '../game/Cyclists';
@@ -61,6 +62,8 @@ export class RaceScene extends Phaser.Scene {
   private cyclists!: CyclistTraffic;
   /** Running behind the title screen: no player, no HUD, the camera tours the city. */
   private attract = false;
+  /** Where this race started (unset in attract mode). */
+  private place?: StartPlace;
   private fadeInOnStart = false;
   private attractPath: Pt[] = [];
   private attractDist = 0;
@@ -107,7 +110,8 @@ export class RaceScene extends Phaser.Scene {
     this.look.set(0, 0);
     const vehicle = vehicleById(this.registry.get('vehicle'));
     const water = new Waterway(mapData, this.track);
-    let spawn = this.track.spawn();
+    this.place = this.attract ? undefined : this.startPlace();
+    let spawn = this.place ? { ...latLonToPx(mapData, this.place.lat, this.place.lon), heading: this.place.headingDeg } : this.track.spawn();
     if (vehicle.onWater) spawn = water.spawnNear(spawn.x, spawn.y) ?? spawn;
     this.car = new Car(this, this.track, vehicle, spawn.x, spawn.y, spawn.heading);
     this.car.railCrossed = (x0, y0, x1, y1) => this.tram.railCrossed(x0, y0, x1, y1);
@@ -225,6 +229,19 @@ export class RaceScene extends Phaser.Scene {
     return this.add.bitmapText(x, y, FONT.key, fontSafe(s)).setTint(color).setScrollFactor(0).setDepth(100);
   }
 
+  /**
+   * A new race (from the title screen) starts at a random well-known place, not the same as last
+   * time; resets (R) and vehicle changes (V) keep you where you are.
+   */
+  private startPlace(): StartPlace {
+    const last = this.registry.get('startPlace') as number | undefined;
+    if (last !== undefined && !this.fadeInOnStart) return START_PLACES[last];
+    const options = START_PLACES.map((_, i) => i).filter((i) => i !== last);
+    const i = options[Math.floor(Math.random() * options.length)];
+    this.registry.set('startPlace', i);
+    return START_PLACES[i];
+  }
+
   private createHud() {
     const { width, height } = this.scale;
     this.add.image(0, 0, 'px').setOrigin(0).setDisplaySize(68, 17).setTint(PALETTE.uiBg).setAlpha(0.75).setScrollFactor(0).setDepth(99);
@@ -234,7 +251,7 @@ export class RaceScene extends Phaser.Scene {
     const credit = this.text(2, height - 8, '(C) OPENSTREETMAP CONTRIBUTORS').setAlpha(0.7);
     this.add.image(0, height - 9, 'px').setOrigin(0).setDisplaySize(credit.width + 4, 9).setTint(PALETTE.uiBg).setAlpha(0.5).setScrollFactor(0).setDepth(99);
 
-    const hint = this.text(0, 24, `${this.car.spec.name}\n\nARROWS/WASD DRIVE\nSPACE HANDBRAKE\nV VEHICLE  N NIGHT\nR RESET  C CREDITS`);
+    const hint = this.text(0, 24, `${this.place ? `${this.place.name}\n` : ''}${this.car.spec.name}\n\nARROWS/WASD DRIVE\nSPACE HANDBRAKE\nV VEHICLE  N NIGHT\nR RESET  C CREDITS`);
     hint.setX(Math.round((width - hint.width) / 2)).setCenterAlign();
     const box = this.add.image(hint.x - 4, hint.y - 3, 'px').setOrigin(0).setDisplaySize(hint.width + 8, hint.height + 5)
       .setTint(PALETTE.uiBg).setAlpha(0.8).setScrollFactor(0).setDepth(99);
