@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "fetch-map": "tsx scripts/fetch-map.ts",
     "gen-placeholders": "tsx scripts/gen-placeholders.ts",
-    "fetch-height": "tsx scripts/fetch-height.ts"
+    "fetch-height": "tsx scripts/fetch-height.ts",
+    "editor": "vite --open /editor.html"
   },
   "dependencies": {
     "phaser": "^4.2.1"

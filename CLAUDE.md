@@ -72,6 +72,20 @@ upper windows), queried via `PointIndex`. In v4, DynamicTexture draws are buffer
 Lamp posts are sprites per chunk (`TrackMap.lampSprites`), depth-sorted against the car each frame, and solid via
 a small circle-vs-box test in `Car.collides`.
 
+## Map editor and edit log
+- `editor.html` + `src/editor/` is dev-only (excluded from `npm run build`). It talks to a Vite middleware in
+  `vite.config.ts`: `GET/POST /__editor/edits` reads or appends `data/edits/log.jsonl`, and `POST /__editor/rebuild`
+  runs fetch-map.
+- Every generated lamp, sign and marking carries provenance properties: `key` (stable while its OSM source is
+  stable, e.g. `lamp:way/123#7`, `zebra:way/1:node/2`), `rule` (generator logic, e.g. `sign.speed.change`) and
+  `osm` (space-separated `way/…`/`node/…`). Keep keys unique and deterministic when changing generators,
+  because edits target them.
+- `src/editor/edits.ts` is the single edit model and `applyEdits()` implementation, shared by fetch-map (applied
+  to the Tiled JSON right before it's written) and the editor (preview). Positions are lat/lon via `mapGeo(map)`.
+  Added objects get key `edit:<id>`.
+- The log is for analysis as well as replay. Each edit stores `reason`, optional `note`, and a `source` snapshot
+  (rule/osm/type). Don't drop those fields.
+
 ## Gameplay conventions
 - Hand-rolled physics, no Arcade/Matter. In `Car.ts` velocity is split into forward and lateral parts, and the lateral
   part decays by `exp(-grip·dt)`. Speeds are px/s (≈ km/h).

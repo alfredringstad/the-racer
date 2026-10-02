@@ -16,6 +16,7 @@ import { overpass, type LatLon, type OsmElement, type OsmNode, type OverpassResp
 import { buildingStyle, hasOutdoorSeating, POI_QUERY, poiFacade } from './lib/buildings';
 import { buildMarkings, type Marking } from './lib/markings';
 import { buildSigns, type Sign } from './lib/signs';
+import { applyEdits, parseEditLog } from '../src/editor/edits';
 import { signFrame } from '../src/game/signs';
 import { buildTramRoutes } from './lib/tram-routes';
 import { dominantGridAngle, Projection, relationRings, type Vec } from './lib/geo';
@@ -32,6 +33,8 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const CACHE_FILE = resolve(ROOT, 'data/osm-cache.json');
 const MAP_FILE = resolve(ROOT, 'public/assets/maps/norrkoping.json');
 const PREVIEW_FILE = resolve(ROOT, 'data/map-preview.png');
+/** Map-editor corrections, one JSON edit per line. */
+const EDITS_FILE = resolve(ROOT, 'data/edits/log.jsonl');
 
 /** Metres per 16px tile. The car sprite is 16px, so this also sets how big streets feel. */
 const METRES_PER_TILE = 2.25;
@@ -579,7 +582,7 @@ function buildMap(cache: Cache) {
   };
 
   // 6. Street lamps: the (few) mapped ones, then generated ones along every street not tagged lit=no.
-  const lamps: { x: number; y: number; source: 'osm' | 'generated' }[] = [];
+  const lamps: { x: number; y: number; source: 'osm' | 'generated'; key: string; rule: string; osm: string[] }[] = [];
   const lampGrid = new Map<string, { x: number; y: number }[]>();
   const gapPx = (LAMP_MIN_GAP_M / METRES_PER_TILE) * TILE_SIZE;
   const lampKey = (x: number, y: number) => `${Math.floor(x / gapPx)},${Math.floor(y / gapPx)}`;
@@ -590,8 +593,8 @@ function buildMap(cache: Cache) {
         for (const l of lampGrid.get(`${gx + dx},${gy + dy}`) ?? []) if (Math.hypot(l.x - x, l.y - y) < gapPx) return true;
     return false;
   };
-  const addLamp = (x: number, y: number, source: 'osm' | 'generated') => {
-    lamps.push({ x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10, source });
+  const addLamp = (x: number, y: number, source: 'osm' | 'generated', key: string, osm: string) => {
+    lamps.push({ x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10, source, key, rule: `lamp.${source}`, osm: [osm] });
     const k = lampKey(x, y);
     if (!lampGrid.has(k)) lampGrid.set(k, []);
     lampGrid.get(k)!.push({ x, y });
@@ -599,7 +602,7 @@ function buildMap(cache: Cache) {
   for (const el of els)
     if (el.type === 'node' && tag(el, 'highway') === 'street_lamp') {
       const p = px(toTile(el));
-      if (inside(p)) addLamp(p.x, p.y, 'osm');
+      if (inside(p)) addLamp(p.x, p.y, 'osm', `lamp:node/${el.id}`, `node/${el.id}`);
     }
   const lampSpot = (x: number, y: number) => {
     const c = Math.floor(x / TILE_SIZE);
@@ -617,7 +620,7 @@ function buildMap(cache: Cache) {
       const side = i % 2 ? 1 : -1;
       const lx = x * TILE_SIZE - dy * halfPx * side;
       const ly = y * TILE_SIZE + dx * halfPx * side;
-      if (inside({ x: lx, y: ly }) && lampSpot(lx, ly) && !tooClose(lx, ly)) addLamp(lx, ly, 'generated');
+      if (inside({ x: lx, y: ly }) && lampSpot(lx, ly) && !tooClose(lx, ly)) addLamp(lx, ly, 'generated', `lamp:way/${w.id}#${i}`, `way/${w.id}`);
     });
   }
   console.log(`Street lamps: ${lamps.filter((l) => l.source === 'osm').length} mapped, ${lamps.filter((l) => l.source === 'generated').length} generated`);
@@ -908,7 +911,7 @@ function toTiled(m: ReturnType<typeof buildMap>, cache: Cache) {
           point: true,
           rotation: 0,
           visible: true,
-          properties: [{ name: 'source', type: 'string', value: l.source }],
+          properties: [{ name: 'source', type: 'string', value: l.source }, ...provenanceProps(l)],
         })),
       },
       {
@@ -999,6 +1002,7 @@ function toTiled(m: ReturnType<typeof buildMap>, cache: Cache) {
           rotation: 0,
           visible: true,
           properties: [
+            ...provenanceProps(sg),
             { name: 'frame', type: 'int', value: signFrame(sg.kind, sg.value)! },
             { name: 'facing', type: 'float', value: Math.round((sg.facing * 180) / Math.PI) },
             ...(sg.value !== undefined ? [{ name: 'value', type: 'int', value: sg.value }] : []),
@@ -1019,7 +1023,7 @@ function markingObject(mk: Marking, id: number) {
       y: r(mk.y),
       point: true,
       rotation: r((mk.angle * 180) / Math.PI),
-      properties: [{ name: 'turn', type: 'string', value: mk.turn }],
+      properties: [{ name: 'turn', type: 'string', value: mk.turn }, ...provenanceProps(mk)],
     };
   const [o] = mk.points;
   const props =
@@ -1037,7 +1041,16 @@ function markingObject(mk: Marking, id: number) {
               { name: 'towardsX', type: 'float', value: r(mk.towards.x) },
               { name: 'towardsY', type: 'float', value: r(mk.towards.y) },
             ];
-  return { ...base, x: r(o.x), y: r(o.y), polyline: mk.points.map((p) => ({ x: r(p.x - o.x), y: r(p.y - o.y) })), properties: props };
+  return { ...base, x: r(o.x), y: r(o.y), polyline: mk.points.map((p) => ({ x: r(p.x - o.x), y: r(p.y - o.y) })), properties: [...props, ...provenanceProps(mk)] };
+}
+
+/** Tiled properties recording where a generated feature came from (used by the map editor and edit analysis). */
+function provenanceProps(p: { key: string; rule: string; osm: string[] }) {
+  return [
+    { name: 'key', type: 'string', value: p.key },
+    { name: 'rule', type: 'string', value: p.rule },
+    { name: 'osm', type: 'string', value: p.osm.join(' ') },
+  ];
 }
 
 /** One pixel per tile, coloured by what's drawn there — a quick sanity check of the whole map. */
@@ -1089,7 +1102,15 @@ async function main() {
   const cache = await loadData(process.argv.includes('--refresh'));
   const m = buildMap(cache);
   mkdirSync(dirname(MAP_FILE), { recursive: true });
-  writeFileSync(MAP_FILE, JSON.stringify(toTiled(m, cache)));
+  const tiled = toTiled(m, cache);
+  // Map-editor corrections, re-applied on every rebuild (see src/editor/edits.ts).
+  if (existsSync(EDITS_FILE)) {
+    const edits = parseEditLog(readFileSync(EDITS_FILE, 'utf8'));
+    const report = applyEdits(tiled, edits);
+    console.log(`Edits: ${report.applied.length} applied, ${report.orphaned.length} orphaned (target no longer generated)`);
+    for (const e of report.orphaned.slice(0, 10)) console.log(`  orphaned ${e.op} ${e.layer} ${e.target ?? ''} (${e.reason}) ${e.id}`);
+  }
+  writeFileSync(MAP_FILE, JSON.stringify(tiled));
   writeFileSync(PREVIEW_FILE, preview(m).toPNG());
   console.log(`Spawn at (${m.spawn.x}, ${m.spawn.y}) heading ${m.spawn.heading}°`);
   console.log(`Wrote ${MAP_FILE}\nWrote ${PREVIEW_FILE} (1 px per tile)`);

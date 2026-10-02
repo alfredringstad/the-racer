@@ -11,6 +11,12 @@ import { signFrame, type SignKind } from '../../src/game/signs';
 import type { MarkingRoad } from './markings';
 
 export interface Sign {
+  /** Stable id for map-editor corrections (see Provenance in markings.ts). */
+  key: string;
+  /** Generator logic that placed it, e.g. sign.speed.change. */
+  rule: string;
+  /** OSM elements it was derived from. */
+  osm: string[];
   kind: SignKind;
   x: number;
   y: number;
@@ -38,7 +44,7 @@ export function buildSigns(
    * Puts a sign beside `road`, `s` px along it, on the right of travel direction `travel` (1 = along the
    * point order, -1 = against it). Slides along the road and outwards to find a free spot.
    */
-  const place = (road: MarkingRoad, s: number, travel: 1 | -1, kind: SignKind, value?: number) => {
+  const place = (road: MarkingRoad, s: number, travel: 1 | -1, kind: SignKind, value: number | undefined, anchor: string, rule: string) => {
     if (signFrame(kind, value) === undefined) return;
     for (const along of [0, m(2), -m(2), m(4), -m(4), m(6)])
       for (const out of [m(1.2), m(2), m(0.6)]) {
@@ -50,7 +56,17 @@ export function buildSigns(
         const y = p.y + dx * side;
         if (!free(x, y)) continue;
         taken.push({ x, y });
-        signs.push({ kind, x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10, value, facing: Math.atan2(dy, dx) });
+        const osm = [`way/${road.id}`, ...(anchor.startsWith('node/') ? [anchor] : [])];
+        signs.push({
+          key: `${kind}:way/${road.id}:${anchor}:${travel === 1 ? 'fwd' : 'bwd'}`,
+          rule,
+          osm,
+          kind,
+          x: Math.round(x * 10) / 10,
+          y: Math.round(y * 10) / 10,
+          value,
+          facing: Math.atan2(dy, dx),
+        });
         return;
       }
   };
@@ -88,14 +104,14 @@ export function buildSigns(
     // Speed limit: entering this road from a junction where some other road has a different limit.
     if (p.speed !== undefined) {
       const differs = (n: number) => (at.get(n) ?? []).some((q) => q !== p && q.speed !== undefined && q.speed !== p.speed);
-      if (differs(first)) place(road, startS, 1, 'speed', p.speed);
-      if (!oneway && differs(last)) place(road, endS, -1, 'speed', p.speed);
+      if (differs(first)) place(road, startS, 1, 'speed', p.speed, `node/${first}`, 'sign.speed.change');
+      if (!oneway && differs(last)) place(road, endS, -1, 'speed', p.speed, `node/${last}`, 'sign.speed.change');
     }
 
     // One-way streets: "one way" where you enter, "no entry" facing anyone about to go in the wrong end.
     if (oneway && !p.roundabout) {
-      if (isJunction(first)) place(road, startS, 1, 'oneway');
-      if (isJunction(last)) place(road, endS, -1, 'no_entry');
+      if (isJunction(first)) place(road, startS, 1, 'oneway', undefined, `node/${first}`, 'sign.oneway.entry');
+      if (isJunction(last)) place(road, endS, -1, 'no_entry', undefined, `node/${last}`, 'sign.no_entry.exit');
     }
 
     road.nodes.forEach((n, i) => {
@@ -106,18 +122,18 @@ export function buildSigns(
         const dir = tags!.direction ?? tags!['traffic_signals:direction'];
         const back = m(2);
         if (isJunction(n)) {
-          if (i > 0) place(road, dist[i] - widestAt(n) / 2 - back, 1, kind);
-          if (!oneway && i < road.nodes.length - 1) place(road, dist[i] + widestAt(n) / 2 + back, -1, kind);
-        } else if (dir === 'backward' && !oneway) place(road, dist[i] + back, -1, kind);
-        else place(road, dist[i] - back, 1, kind);
+          if (i > 0) place(road, dist[i] - widestAt(n) / 2 - back, 1, kind, undefined, `node/${n}`, `sign.${kind}.junction`);
+          if (!oneway && i < road.nodes.length - 1) place(road, dist[i] + widestAt(n) / 2 + back, -1, kind, undefined, `node/${n}`, `sign.${kind}.junction`);
+        } else if (dir === 'backward' && !oneway) place(road, dist[i] + back, -1, kind, undefined, `node/${n}`, `sign.${kind}.node`);
+        else place(road, dist[i] - back, 1, kind, undefined, `node/${n}`, `sign.${kind}.node`);
       }
       // Pedestrian crossing signs before marked zebras, for each direction of traffic.
       if (kind === 'crossing') {
         const marked = MARKED_CROSSINGS.has(tags!.crossing ?? '') || ['yes', 'zebra'].includes(tags!['crossing:markings'] ?? '');
         const unmarked = ['unmarked', 'informal', 'no'].includes(tags!.crossing ?? '') || tags!['crossing:markings'] === 'no';
         if (!marked || unmarked) return;
-        place(road, dist[i] - m(2.5), 1, 'crossing');
-        if (!oneway) place(road, dist[i] + m(2.5), -1, 'crossing');
+        place(road, dist[i] - m(2.5), 1, 'crossing', undefined, `node/${n}`, 'sign.crossing.zebra');
+        if (!oneway) place(road, dist[i] + m(2.5), -1, 'crossing', undefined, `node/${n}`, 'sign.crossing.zebra');
       }
     });
   }

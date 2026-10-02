@@ -76,6 +76,30 @@ What the script does:
 Tunables (tile size in metres, margin, road widths, storefront search radius) are at the top of
 `scripts/fetch-map.ts`. Which OSM tags become which building style or storefront is in `scripts/lib/buildings.ts`.
 
+## Map editor
+
+```bash
+npm run editor
+```
+
+This opens `/editor.html` on the dev server: the generated map, rendered by the game's own code, where you can
+correct what the generator got wrong. So far it covers street lamps, road signs and road markings.
+
+- **Select:** click a lamp, sign or marking. The panel shows its stable `key`, the generator `rule` that
+  produced it, and links to the OpenStreetMap elements it came from.
+- **Edit:** drag to move, <kbd>Del</kbd> to remove, <kbd>L</kbd> to add a lamp and <kbd>K</kbd> to add the
+  sign chosen in the panel (at the cursor). Speed signs can have their limit changed.
+- **Navigate:** drag empty space or use the arrow keys to pan, and the wheel to zoom.
+- **Reason:** every edit records why it was made. Each action has a sensible default (remove → *doesn't
+  exist in reality*, move → *wrong position*, ...), and you can override it per edit, with an optional note.
+- **Save** appends the session's edits to `data/edits/log.jsonl`. **Rebuild map** runs `fetch-map`, which
+  re-applies the whole log on top of the freshly generated map, then reloads.
+
+The edit log is meant to be committed and analysed, not just replayed. Each line names its target by key,
+snapshots the target's rule and OSM ids, and stores positions as lat/lon, so edits survive changes to the
+tile size or map frame. Edits whose target is no longer generated (for example because OSM changed) are
+reported as *orphaned* when the map is rebuilt.
+
 ## Height data (optional)
 
 Terrain heights come from Lantmäteriet's 1 m ground model ("Markhöjdmodell Nedladdning, grid 1+", free,

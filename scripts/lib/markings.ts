@@ -16,12 +16,25 @@ export interface MarkingRoad {
   widthPx: number;
 }
 
-export type Marking =
-  | { kind: 'line'; points: Pt[]; dash: number; gap: number; style: 'centre' | 'lane' | 'bike' }
-  | { kind: 'stop'; points: [Pt, Pt]; width: number }
-  | { kind: 'giveway'; points: [Pt, Pt]; towards: Pt } // teeth point towards `towards` (approaching traffic)
-  | { kind: 'zebra'; points: [Pt, Pt]; depth: number } // a→b spans the road; stripes run along the road
-  | { kind: 'arrow'; x: number; y: number; angle: number; turn: string };
+/**
+ * Where a generated feature came from, so map-editor corrections can target it across rebuilds and be
+ * analysed later: `key` is stable as long as the OSM source is, `rule` names the generator logic, and
+ * `osm` lists the OSM elements it was derived from.
+ */
+export interface Provenance {
+  key: string;
+  rule: string;
+  osm: string[];
+}
+
+export type Marking = Provenance &
+  (
+    | { kind: 'line'; points: Pt[]; dash: number; gap: number; style: 'centre' | 'lane' | 'bike' }
+    | { kind: 'stop'; points: [Pt, Pt]; width: number }
+    | { kind: 'giveway'; points: [Pt, Pt]; towards: Pt } // teeth point towards `towards` (approaching traffic)
+    | { kind: 'zebra'; points: [Pt, Pt]; depth: number } // a→b spans the road; stripes run along the road
+    | { kind: 'arrow'; x: number; y: number; angle: number; turn: string }
+  );
 
 const NO_PAINT_HIGHWAYS = new Set(['pedestrian', 'living_street', 'service', 'track']);
 const MAJOR = new Set(['primary', 'secondary', 'tertiary', 'trunk', 'motorway']);
@@ -106,7 +119,18 @@ export function buildMarkings(
         const s1 = dist[cuts[k]] - clearance(cuts[k]);
         if (s1 - s0 < m(4)) continue;
         const piece = slicePolyline(road.points, s0, s1);
-        for (const o of offsets) out.push({ kind: 'line', points: offsetPolyline(piece, o.d), dash: o.dash, gap: o.gap, style: o.style });
+        offsets.forEach((o, oi) =>
+          out.push({
+            kind: 'line',
+            points: offsetPolyline(piece, o.d),
+            dash: o.dash,
+            gap: o.gap,
+            style: o.style,
+            key: `line:way/${raw.id}:${k}:${o.style}${oi}`,
+            rule: `marking.line.${o.style}`,
+            osm: [`way/${raw.id}`],
+          }),
+        );
       }
     }
 
@@ -139,10 +163,12 @@ export function buildMarkings(
       else lines.push({ s: dist[i], from: -half, to: half, travel: 1 });
       for (const l of lines) {
         const pts = across(l.s, l.from + 1, l.to - 1);
+        const dirKey = l.travel === 1 ? 'fwd' : 'bwd';
+        const prov = { osm: [`way/${raw.id}`, `node/${n}`], rule: `marking.${kind === 'give_way' ? 'giveway' : 'stop'}.${kind}` };
         if (kind === 'give_way') {
           const p = pointAlong(road.points, l.s);
-          out.push({ kind: 'giveway', points: pts, towards: { x: -p.dx * l.travel, y: -p.dy * l.travel } });
-        } else out.push({ kind: 'stop', points: pts, width: Math.max(2, Math.round(m(0.4))) });
+          out.push({ kind: 'giveway', points: pts, towards: { x: -p.dx * l.travel, y: -p.dy * l.travel }, key: `giveway:way/${raw.id}:node/${n}:${dirKey}`, ...prov });
+        } else out.push({ kind: 'stop', points: pts, width: Math.max(2, Math.round(m(0.4))), key: `stop:way/${raw.id}:node/${n}:${dirKey}`, ...prov });
       }
     });
 
@@ -153,7 +179,14 @@ export function buildMarkings(
       const marked = MARKED_CROSSINGS.has(tags.crossing ?? '') || ['yes', 'zebra'].includes(tags['crossing:markings'] ?? '') || tags.crossing_ref === 'zebra';
       const unmarked = ['unmarked', 'informal', 'no'].includes(tags.crossing ?? '') || tags['crossing:markings'] === 'no';
       if (!marked || unmarked) return;
-      out.push({ kind: 'zebra', points: across(dist[i], -half + 1, half - 1), depth: m(3) });
+      out.push({
+        kind: 'zebra',
+        points: across(dist[i], -half + 1, half - 1),
+        depth: m(3),
+        key: `zebra:way/${raw.id}:node/${n}`,
+        rule: 'marking.zebra',
+        osm: [`way/${raw.id}`, `node/${n}`],
+      });
     });
 
     // --- Turn arrows from turn:lanes, a little before the junction the lanes lead to.
@@ -170,7 +203,16 @@ export function buildMarkings(
       turns.forEach((turn, k) => {
         if (!turn || turn === 'none') return;
         const off = laneCentres[k];
-        out.push({ kind: 'arrow', x: p.x - p.dy * off, y: p.y + p.dx * off, angle: Math.atan2(p.dy * travel, p.dx * travel), turn });
+        out.push({
+          kind: 'arrow',
+          x: p.x - p.dy * off,
+          y: p.y + p.dx * off,
+          angle: Math.atan2(p.dy * travel, p.dx * travel),
+          turn,
+          key: `arrow:way/${raw.id}:${travel === 1 ? 'fwd' : 'bwd'}:${k}`,
+          rule: 'marking.arrow',
+          osm: [`way/${raw.id}`],
+        });
       });
     };
     // Lanes are listed left to right as seen by the driver.
