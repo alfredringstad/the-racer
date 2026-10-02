@@ -19,7 +19,7 @@ const game = new Phaser.Game({
   scale: {
     mode: Phaser.Scale.NONE,
     zoom: Phaser.Scale.MAX_ZOOM, // largest integer multiple that fits
-    autoCenter: Phaser.Scale.CENTER_BOTH,
+    // No autoCenter: index.html centres the canvas with flexbox, and doing both double-offsets it.
   },
   scene: [BootScene, RaceScene, TitleScene, CreditsScene],
 });
