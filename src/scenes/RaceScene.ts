@@ -14,6 +14,7 @@ import { VEHICLES, vehicleById } from '../game/vehicles';
 import { Waterway } from '../game/water';
 import { TramTraffic } from '../game/Trams';
 import { Crowd } from '../game/People';
+import { CyclistTraffic } from '../game/Cyclists';
 
 const SKID_POOL = 600;
 const SKID_SLIP = 22; // px/s of sideways speed before tyres leave marks
@@ -51,6 +52,7 @@ export class RaceScene extends Phaser.Scene {
   private wasDown = false;
   private trams!: TramTraffic;
   private crowd!: Crowd;
+  private cyclists!: CyclistTraffic;
 
   constructor() {
     super('Race');
@@ -97,6 +99,7 @@ export class RaceScene extends Phaser.Scene {
     this.trams = new TramTraffic(this, mapData, NPC_TRAM_LINES);
     this.car.obstacleAt = (x, y) => this.trams.solidAt(x, y);
     this.crowd = new Crowd(this, this.track, mapData, this.trams);
+    this.cyclists = new CyclistTraffic(this, mapData, this.crowd, this.trams);
     this.controls = new Controls(this);
 
     for (let i = 0; i < SKID_POOL; i++)
@@ -207,7 +210,9 @@ export class RaceScene extends Phaser.Scene {
     this.trams.update(delta, car);
     car.update(input, delta, time);
     // Knocking someone over costs a little speed.
-    if (this.crowd.update(delta, this.cameras.main.worldView, car, this.lighting.night) > 0) {
+    const view = this.cameras.main.worldView;
+    const night = this.lighting.night;
+    if (this.crowd.update(delta, view, car, night) + this.cyclists.update(delta, view, car, night) > 0) {
       car.vx *= 0.8;
       car.vy *= 0.8;
     }
@@ -225,7 +230,7 @@ export class RaceScene extends Phaser.Scene {
 
     // Lamp posts draw over the car when it's behind (north of) them, under it otherwise.
     for (const pole of this.track.poleSprites) pole.setDepth(pole.y > car.y ? 11 : 9.5);
-    this.lighting.update(delta, car, input.brake && car.forwardSpeed > 5, this.trams.trams.map((t) => t.lights));
+    this.lighting.update(delta, car, input.brake && car.forwardSpeed > 5, this.trams.trams.map((t) => t.lights), this.cyclists.lights);
 
     if (car.spec.wake) {
       if (Math.abs(car.forwardSpeed) > WAKE_SPEED && !car.underBridge) this.dropWake();

@@ -28,7 +28,7 @@ import {
   type Facade,
 } from '../src/game/tiles';
 import { FONT, GLYPHS } from '../src/game/font';
-import { drawDogs, drawKids, drawPeople } from './lib/people';
+import { drawCyclists, drawDogs, drawKids, drawPeople } from './lib/people';
 import { SIGN_FOOT_ROW, SIGN_FRAME_COUNT, SIGN_H, SIGN_KINDS, SIGN_W, SPEED_LIMITS, signFrame } from '../src/game/signs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -852,6 +852,7 @@ const outputs: Array<[string, () => Img]> = [
   ['public/assets/sprites/people.png', drawPeople],
   ['public/assets/sprites/kids.png', drawKids],
   ['public/assets/sprites/dogs.png', drawDogs],
+  ['public/assets/sprites/cyclists.png', drawCyclists],
   ['public/' + FONT.path, drawFont],
   ['public/assets/sprites/street-lamp.png', drawStreetLamp],
   ['public/assets/sprites/signs.png', drawSigns],

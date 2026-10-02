@@ -3,7 +3,7 @@
 
 import { Img } from './png';
 import { PALETTE as P } from '../../src/game/palette';
-import { ADULTS, DOGS, FACINGS, KIDS, WALK_FRAMES, type Facing, type SheetSpec } from '../../src/game/people-sheet';
+import { ADULTS, CYCLIST_FRAMES, CYCLISTS, DOGS, FACINGS, KIDS, WALK_FRAMES, type Facing, type SheetSpec } from '../../src/game/people-sheet';
 
 type Frames = Record<Facing, string[][]>;
 
@@ -127,6 +127,41 @@ export function drawKids(): Img {
     const shirt = KID_SHIRTS[v % KID_SHIRTS.length];
     return { h: HAIR[(v * 5 + 2) % HAIR.length], s: SKIN[(v + 1) % SKIN.length], k: P.ink, c: shirt, d: darken(shirt), p: KID_TROUSERS[(v * 3) % KID_TROUSERS.length] };
   });
+}
+
+/**
+ * Cyclists from above, facing east, like the player's bike: helmet, jersey, arms to the
+ * handlebar, wheels fore and aft. Two frames with a knee coming up on alternate sides.
+ */
+const CYCLIST_ROWS = (knee: 'left' | 'right') => [
+  '................',
+  '................',
+  '................',
+  '................',
+  '................',
+  '....kkkk........',
+  knee === 'left' ? '...kbbbbpssk....' : '...kbbbbkssk....',
+  '.tttkbbhhkfftttt',
+  '.tttkbbhhkfftttt',
+  knee === 'right' ? '...kbbbbpssk....' : '...kbbbbkssk....',
+  '....kkkk........',
+  '................',
+  '................',
+  '................',
+  '................',
+  '................',
+];
+const JERSEYS = [P.awningGreen, P.gold, P.awningRed, P.stained, P.uiText, P.copper];
+const HELMETS = [P.ink, P.awningBlue, P.uiText, P.gold, P.carBody, P.awningGreen];
+const FRAMES = [P.carBody, P.signBlue, P.ink, P.awningGreen, P.stone, P.gold];
+
+export function drawCyclists(): Img {
+  const img = new Img(CYCLISTS.w * CYCLIST_FRAMES, CYCLISTS.h * CYCLISTS.variants);
+  for (let v = 0; v < CYCLISTS.variants; v++) {
+    const colors = { k: P.ink, b: JERSEYS[v], h: HELMETS[(v * 5 + 1) % HELMETS.length], s: SKIN[v % SKIN.length], f: FRAMES[(v * 3 + 2) % FRAMES.length], t: P.tyre, p: TROUSERS[v % TROUSERS.length] };
+    (['left', 'right'] as const).forEach((knee, f) => img.pattern(f * CYCLISTS.w, v * CYCLISTS.h, CYCLIST_ROWS(knee), colors));
+  }
+  return img;
 }
 
 export function drawDogs(): Img {

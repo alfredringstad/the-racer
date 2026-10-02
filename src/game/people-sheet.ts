@@ -12,7 +12,10 @@ export interface SheetSpec {
 export const ADULTS: SheetSpec = { key: 'people', w: 8, h: 12, variants: 12 };
 export const KIDS: SheetSpec = { key: 'kids', w: 8, h: 9, variants: 8 };
 export const DOGS: SheetSpec = { key: 'dogs', w: 10, h: 8, variants: 4 };
-export const SHEETS: readonly SheetSpec[] = [ADULTS, KIDS, DOGS];
+/** NPC cyclists, top-down like the player's bike and facing east; columns are two pedalling frames. */
+export const CYCLISTS: SheetSpec = { key: 'cyclists', w: 16, h: 16, variants: 6 };
+export const CYCLIST_FRAMES = 2;
+export const SHEETS: readonly SheetSpec[] = [ADULTS, KIDS, DOGS, CYCLISTS];
 
 export type Facing = 'down' | 'up' | 'side';
 export const FACINGS: readonly Facing[] = ['down', 'up', 'side'];

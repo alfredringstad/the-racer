@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import type { Car } from './Car';
+import type { BikeLights } from './Cyclists';
 import type { TrackMap } from './TrackMap';
 
 // Colours of the night. The light map is multiplied over the world: white = untouched,
@@ -97,7 +98,7 @@ export class NightLighting {
     this.target = this.target ? 0 : 1;
   }
 
-  update(dtMs: number, car: Car, braking: boolean, trams: readonly TramLights[] = []) {
+  update(dtMs: number, car: Car, braking: boolean, trams: readonly TramLights[] = [], bikes: readonly BikeLights[] = []) {
     const step = dtMs / 1000 / TRANSITION_S;
     this.night = this.target > this.night ? Math.min(this.target, this.night + step) : Math.max(this.target, this.night - step);
     const visible = this.night > 0.001;
@@ -165,6 +166,16 @@ export class NightLighting {
         scaleY: HEADLIGHT_SCALE_Y,
       });
       for (const p of t.sections) stamp(lm, 'light-small', p.x, p.y, WINDOW_LIGHT, 0.6 * n * t.alpha, { scale: 2.4 });
+    }
+
+    // NPC cyclists: a small white lamp in front, a red light behind.
+    for (const b of bikes) {
+      if (b.x < x0 || b.x > x1 || b.y < y0 || b.y > y1) continue;
+      const bc = Math.cos(b.angle);
+      const bs = Math.sin(b.angle);
+      stamp(lm, 'light-small', b.x + bc * 14, b.y + bs * 14, HEADLIGHT, 0.75 * n, { scale: 1.5 });
+      stamp(gm, 'light-small', b.x + bc * 6, b.y + bs * 6, HEADLIGHT, 0.6 * n, { scale: 0.25 });
+      stamp(gm, 'light-small', b.x - bc * 6, b.y - bs * 6, TAIL_LIGHT, 0.6 * n, { scale: 0.25 });
     }
 
     // Vehicle: headlight beam ahead, tail lights behind (brighter when braking). Boats get lanterns.
