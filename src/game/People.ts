@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { FONT } from './font';
 import { PALETTE } from './palette';
-import { personFrame, PERSON_VARIANTS, type Facing } from './people-sheet';
+import { ADULTS, DOGS, KIDS, sheetFrame, type Facing, type SheetSpec } from './people-sheet';
 import { prop, type TiledMap, type TrackMap } from './TrackMap';
 import type { TramTraffic } from './Trams';
 import type { Surface } from './tiles';
@@ -27,11 +27,27 @@ const DOWN_TIME = 1.8;
 /** px walked per animation step. */
 const STEP_PX = 4;
 
+// Who's out: share of new arrivals walking a dog, bringing kids, or kids out on their own.
+const DOG_CHANCE = 0.18;
+const FAMILY_CHANCE = 0.14;
+const KID_GANG_CHANCE = 0.05;
+/** Kids on their own run about. */
+const KID_RUN_MIN = 15;
+const KID_RUN_MAX = 20;
+/** How far (px) a dog can be from its owner before the leash pulls it along. */
+const LEASH = 14;
+/** Followers can go this much faster than their leader to keep up. */
+const FOLLOW_CATCHUP = 1.8;
+/** Dogs bark at vehicles passing this close (px), at most this often (s). */
+const BARK_RADIUS = 50;
+const BARK_COOLDOWN = 4;
+
 /** People are happy on these (platforms count as paving); roads only at zebra crossings. */
 const WALKABLE = new Set<Surface>(['paving', 'cobble', 'grass']);
 
 type Pt = { x: number; y: number };
-type State = 'walk' | 'idle' | 'wait' | 'board' | 'dodge' | 'down' | 'cross';
+type State = 'walk' | 'idle' | 'wait' | 'board' | 'dodge' | 'down' | 'cross' | 'follow' | 'sniff';
+type Kind = 'adult' | 'kid' | 'dog';
 
 interface Person {
   x: number;
@@ -47,6 +63,18 @@ interface Person {
   vx: number;
   vy: number;
   stop?: number;
+  kind: Kind;
+  sheet: SheetSpec;
+  /** Who a kid or dog is with; they walk beside them (hand in hand, or on the leash). */
+  leader?: Person;
+  /** Which side of the leader (±1), and how many places out (for siblings). */
+  side: number;
+  slot: number;
+  /** Following and actually moving this frame (for the walk animation). */
+  moving: boolean;
+  bark: number;
+  /** Set when removed, so followers know whether their leader boarded a tram or just left. */
+  gone?: 'boarded' | 'removed';
   sprite: Phaser.GameObjects.Image;
   shadow: Phaser.GameObjects.Image;
 }
@@ -82,6 +110,7 @@ export class Crowd {
   /** Trams already handled at their current stop (people got off). */
   private readonly unloaded = new WeakSet<object>();
   private seed = 1;
+  private readonly leashes: Phaser.GameObjects.Graphics;
   /** The first fill puts people in view too; it waits until the camera has found the player. */
   private filled = false;
   /** Running totals, for the curious (and tests). */
@@ -99,6 +128,7 @@ export class Crowd {
       this.zebras.push({ a: { x: o.x + p.x, y: o.y + p.y }, b: { x: o.x + q.x, y: o.y + q.y }, half: (prop<number>(o.properties, 'depth') ?? 20) / 2 });
     }
     for (const o of map.layers.find((l) => l.name === 'tram')?.objects ?? []) if (o.type === 'stop') this.stops.push({ x: o.x, y: o.y, refill: 0 });
+    this.leashes = scene.add.graphics().setDepth(8.2);
   }
 
   private rand() {
@@ -126,10 +156,11 @@ export class Crowd {
     return WALKABLE.has(this.track.surfaceAt(x, y)) || !!this.zebraAt(x, y);
   }
 
-  private add(x: number, y: number, state: State, dir: Pt, stop?: number) {
-    const variant = Math.floor(this.rand() * PERSON_VARIANTS);
-    const shadow = this.scene.add.image(x, y, 'px').setDisplaySize(6, 2).setTint(PALETTE.ink).setAlpha(0.25).setDepth(7.9);
-    const sprite = this.scene.add.image(x, y, 'people', personFrame(variant, 'down', 0)).setOrigin(0.5, 1);
+  private add(x: number, y: number, state: State, dir: Pt, stop?: number, sheet: SheetSpec = ADULTS, leader?: Person, slot = 1) {
+    const variant = Math.floor(this.rand() * sheet.variants);
+    const kind: Kind = sheet === DOGS ? 'dog' : sheet === KIDS ? 'kid' : 'adult';
+    const shadow = this.scene.add.image(x, y, 'px').setDisplaySize(kind === 'adult' ? 6 : 5, 2).setTint(PALETTE.ink).setAlpha(0.25).setDepth(7.9);
+    const sprite = this.scene.add.image(x, y, sheet.key, sheetFrame(variant, 'down', 0)).setOrigin(0.5, 1);
     const p: Person = {
       x,
       y,
@@ -143,6 +174,13 @@ export class Crowd {
       vx: 0,
       vy: 0,
       stop,
+      kind,
+      sheet,
+      leader,
+      side: this.rand() < 0.5 ? -1 : 1,
+      slot,
+      moving: false,
+      bark: 0,
       sprite,
       shadow,
     };
@@ -151,8 +189,32 @@ export class Crowd {
     return p;
   }
 
+  /**
+   * Someone arriving, sometimes with company: a dog on a leash, a kid or two holding hands, or
+   * two kids running about on their own. Returns the leader.
+   */
+  private addGroup(x: number, y: number, state: State, dir: Pt, stop?: number): Person {
+    const r = this.rand();
+    if (r < KID_GANG_CHANCE && state === 'walk') {
+      const a = this.add(x, y, 'walk', dir, undefined, KIDS);
+      a.speed = KID_RUN_MIN + this.rand() * (KID_RUN_MAX - KID_RUN_MIN);
+      const b = this.add(x, y, 'follow', dir, undefined, KIDS, a);
+      b.side = -a.side;
+      return a;
+    }
+    const p = this.add(x, y, state, dir, stop);
+    if (r < KID_GANG_CHANCE + DOG_CHANCE) this.add(x, y, 'follow', dir, undefined, DOGS, p);
+    else if (r < KID_GANG_CHANCE + DOG_CHANCE + FAMILY_CHANCE) {
+      p.speed = WALK_MIN; // strolling at kid pace
+      const n = this.rand() < 0.35 ? 2 : 1;
+      for (let k = 1; k <= n; k++) this.add(x, y, 'follow', dir, undefined, KIDS, p, k).side = 1;
+    }
+    return p;
+  }
+
   private remove(i: number) {
     const p = this.people[i];
+    p.gone ??= 'removed';
     p.sprite.destroy();
     p.shadow.destroy();
     this.people.splice(i, 1);
@@ -194,7 +256,7 @@ export class Crowd {
     if (!this.filled) return 0;
     for (let n = 0; n < (first ? TARGET_COUNT : 2) && this.people.length < TARGET_COUNT; n++) {
       const s = this.spot(cx, cy, first ? 0 : offscreen, ACTIVE_RADIUS);
-      if (s) this.add(s.x, s.y, 'walk', DIRS[Math.floor(this.rand() * 4)]);
+      if (s) this.addGroup(s.x, s.y, 'walk', DIRS[Math.floor(this.rand() * 4)]);
     }
     this.fillStops(dt, cx, cy, view, first);
     this.unloadTrams(cx, cy);
@@ -207,9 +269,11 @@ export class Crowd {
         continue;
       }
       if (!hazard.spec.onWater && this.react(p, hazard)) bumps++;
+      if (p.kind === 'dog') this.barkAt(p, hazard, dt);
       if (this.move(p, dt)) this.remove(i);
       else this.draw(p);
     }
+    this.drawLeashes();
     return bumps;
   }
 
@@ -225,7 +289,7 @@ export class Crowd {
         const x = Math.round(s.x + Math.cos(a) * r);
         const y = Math.round(s.y + Math.sin(a) * r);
         if (!this.walkable(x, y) || this.zebraAt(x, y)) continue;
-        const p = this.add(x, y, 'wait', DIRS[Math.floor(this.rand() * 4)], i);
+        const p = this.addGroup(x, y, 'wait', DIRS[Math.floor(this.rand() * 4)], i);
         p.timer = 2 + this.rand() * 6;
         waiting++;
       }
@@ -250,7 +314,7 @@ export class Crowd {
           const y = Math.round(b.y + b.s * along + b.c * side * 12);
           if (!this.walkable(x, y)) continue;
           const away = Math.abs(b.s) > Math.abs(b.c) ? { x: -Math.sign(b.s * side) || 1, y: 0 } : { x: 0, y: Math.sign(b.c * side) || 1 };
-          const p = this.add(x, y, 'walk', away);
+          const p = this.addGroup(x, y, 'walk', away);
           p.turnTimer = 3;
           this.stats.alighted++;
           break;
@@ -311,7 +375,10 @@ export class Crowd {
           p.x = nx;
           p.y = ny;
         }
-        if (p.timer <= 0) {
+        if (p.timer <= 0 && p.leader && !p.leader.gone) {
+          p.state = 'follow';
+          p.vx = p.vy = 0;
+        } else if (p.timer <= 0) {
           p.state = p.stop !== undefined && p.state === 'dodge' ? 'wait' : 'idle';
           p.timer = p.state === 'idle' ? 0.6 : 3;
           p.vx = p.vy = 0;
@@ -329,7 +396,7 @@ export class Crowd {
       case 'board': {
         const tram = this.trams?.trams.find((t) => t.dwell > 0 && t.contains(p.x, p.y, 70));
         if (!tram) {
-          p.state = p.stop !== undefined ? 'wait' : 'idle';
+          p.state = p.leader && !p.leader.gone ? 'follow' : p.stop !== undefined ? 'wait' : 'idle';
           return false;
         }
         // Head for the nearest door, i.e. the closest point on the nearest section.
@@ -343,6 +410,7 @@ export class Crowd {
         p.phase += BOARD_SPEED * dt;
         if (!tram.contains(p.x, p.y, 1)) return false;
         this.stats.boarded++;
+        p.gone = 'boarded';
         return true;
       }
       case 'cross': {
@@ -357,6 +425,15 @@ export class Crowd {
         }
         return false;
       }
+      case 'follow':
+        return this.follow(p, dt);
+      case 'sniff': {
+        // Nose down until the timer runs out or the leash goes taut.
+        const L = p.leader;
+        p.moving = false;
+        if (!L || L.gone || p.timer <= 0 || Math.hypot(L.x - p.x, L.y - p.y) > LEASH) p.state = 'follow';
+        return false;
+      }
       case 'idle':
         if (p.timer <= 0) {
           const open = this.openDirs(p);
@@ -368,9 +445,9 @@ export class Crowd {
       case 'walk': {
         p.turnTimer -= dt;
         if (p.turnTimer <= 0) {
-          p.turnTimer = 2 + this.rand() * 5;
+          p.turnTimer = p.kind === 'kid' ? 0.8 + this.rand() * 2 : 2 + this.rand() * 5;
           const r = this.rand();
-          if (r < 0.12) {
+          if (r < (p.kind === 'kid' ? 0.04 : 0.12)) {
             p.state = 'idle';
             p.timer = 1 + this.rand() * 3;
             return false;
@@ -424,14 +501,110 @@ export class Crowd {
     }
   }
 
+  /** Kids walk hand in hand beside their leader; dogs trot a little ahead on the leash and stop to sniff. */
+  private follow(p: Person, dt: number): boolean {
+    const L = p.leader;
+    if (!L || L.gone) {
+      // The leader boarded: follow them on. Otherwise carry on alone (kids) or wander off (dogs).
+      if (L?.gone === 'boarded') p.state = 'board';
+      else {
+        p.leader = undefined;
+        p.state = 'walk';
+        p.turnTimer = 1;
+      }
+      return false;
+    }
+    if (L.state === 'board') {
+      p.state = 'board';
+      return false;
+    }
+    const d = L.dir;
+    const sx = -d.y * p.side;
+    const sy = d.x * p.side;
+    let tx = p.kind === 'dog' ? L.x + d.x * 7 + sx * 4 : L.x + sx * 5 * p.slot;
+    let ty = p.kind === 'dog' ? L.y + d.y * 7 + sy * 4 : L.y + sy * 5 * p.slot;
+    // No room beside them (a wall, a lamp post): fall in behind instead.
+    if (!this.walkable(tx, ty)) {
+      tx = L.x - d.x * 6 * p.slot;
+      ty = L.y - d.y * 6 * p.slot;
+    }
+    const dx = tx - p.x;
+    const dy = ty - p.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist > 60) {
+      // Got separated (e.g. after a fall): catch up at once.
+      p.x = tx;
+      p.y = ty;
+    } else if (dist > 0.5) {
+      const step = Math.min(dist, Math.max(L.speed, 8) * FOLLOW_CATCHUP * dt);
+      const nx = p.x + (dx / dist) * step;
+      const ny = p.y + (dy / dist) * step;
+      // Squeeze past whatever is in the way rather than getting left behind.
+      if (!this.track.isSolidAt(nx, ny) || Math.hypot(L.x - p.x, L.y - p.y) > 12) {
+        p.x = nx;
+        p.y = ny;
+      }
+      p.phase += step;
+    }
+    p.moving = dist > 1;
+    p.dir = dist > 2 ? (Math.abs(dx) > Math.abs(dy) ? { x: Math.sign(dx), y: 0 } : { x: 0, y: Math.sign(dy) }) : d;
+    if (p.kind === 'dog' && p.timer <= 0 && this.rand() < 0.2 * dt) {
+      p.state = 'sniff';
+      p.timer = 0.8 + this.rand() * 1.6;
+    }
+    return false;
+  }
+
+  private barkAt(p: Person, h: CrowdHazard, dt: number) {
+    p.bark -= dt;
+    if (p.bark > 0 || p.state === 'down' || h.spec.onWater || h.speed < 15) return;
+    if (Math.hypot(h.x - p.x, h.y - p.y) > BARK_RADIUS) return;
+    p.bark = BARK_COOLDOWN;
+    this.say(p, 'VOFF!');
+  }
+
+  /** Pixel leashes from each owner's hand to their dog's collar. */
+  private drawLeashes() {
+    const g = this.leashes.clear().fillStyle(PALETTE.ink, 0.9);
+    for (const p of this.people) {
+      const L = p.leader;
+      if (p.kind !== 'dog' || !L || L.gone || p.state === 'board') continue;
+      const hx = Math.round(L.x - L.dir.y * p.side * 3);
+      const hy = Math.round(L.y - 4);
+      const cx = Math.round(p.x + (Math.abs(p.dir.x) > 0 ? p.dir.x * 3 : 0));
+      const cy = Math.round(p.y - 4);
+      // Bresenham, one pixel at a time for a crisp line.
+      let x = hx;
+      let y = hy;
+      const dx = Math.abs(cx - hx);
+      const dy = -Math.abs(cy - hy);
+      const stepX = hx < cx ? 1 : -1;
+      const stepY = hy < cy ? 1 : -1;
+      let err = dx + dy;
+      for (let n = 0; n < 64; n++) {
+        g.fillRect(x, y, 1, 1);
+        if (x === cx && y === cy) break;
+        const e2 = 2 * err;
+        if (e2 >= dy) {
+          err += dy;
+          x += stepX;
+        }
+        if (e2 <= dx) {
+          err += dx;
+          y += stepY;
+        }
+      }
+    }
+  }
+
   private draw(p: Person) {
     const facing: Facing = Math.abs(p.dir.x) > Math.abs(p.dir.y) ? 'side' : p.dir.y < 0 ? 'up' : 'down';
-    const moving = p.state === 'walk' || p.state === 'board' || p.state === 'cross';
+    const moving = p.state === 'walk' || p.state === 'board' || p.state === 'cross' || (p.state === 'follow' && p.moving);
     const frame = moving ? 1 + (Math.floor(p.phase / STEP_PX) % 2) : 0;
     const x = Math.round(p.x);
     const y = Math.round(p.y);
     p.sprite
-      .setFrame(personFrame(p.variant, facing, frame))
+      .setFrame(sheetFrame(p.variant, facing, frame))
       .setFlipX(facing === 'side' && p.dir.x < 0)
       .setPosition(x, y)
       .setRotation(p.state === 'down' ? Math.PI / 2 : 0)
@@ -441,5 +614,6 @@ export class Crowd {
 
   destroy() {
     for (let i = this.people.length - 1; i >= 0; i--) this.remove(i);
+    this.leashes.destroy();
   }
 }
