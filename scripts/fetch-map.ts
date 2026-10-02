@@ -198,6 +198,19 @@ interface StreetShape {
   highway: string;
   widthPx: number;
   points: { x: number; y: number }[];
+  /** 1: one-way in drawing order, -1: one-way against it, 0: two-way. */
+  oneway?: number;
+  /** One-way for cars, but bikes may ride both ways (oneway:bicycle=no). */
+  bikeBothWays?: boolean;
+}
+
+/** Direction of travel along an OSM way: roundabouts are one-way unless tagged otherwise. */
+function onewayOf(tags: Record<string, string>): number {
+  const ow = tags.oneway;
+  if (ow === 'yes' || ow === '1' || ow === 'true') return 1;
+  if (ow === '-1' || ow === 'reverse') return -1;
+  if (ow === 'no' || ow === 'false') return 0;
+  return tags.junction === 'roundabout' || tags.junction === 'circular' ? 1 : 0;
 }
 const TREE_TILE: Record<TreePart, number> = { small: T.TREE_SMALL, TL: T.TREE_TL, TR: T.TREE_TR, BL: T.TREE_BL, BR: T.TREE_BR };
 const isRoad = (g: Ground | undefined) => g === 'asphalt' || g === 'cobble';
@@ -532,7 +545,16 @@ function buildMap(cache: Cache) {
   for (const w of roads) {
     const name = w.tags?.name;
     if (!name) continue;
-    streetShapes.push({ name, kind: 'street', highway: w.tags!.highway, widthPx: ROAD_WIDTH[w.tags!.highway] * TILE_SIZE, points: w.geometry.map((p) => px(toTile(p))) });
+    const oneway = onewayOf(w.tags!);
+    streetShapes.push({
+      name,
+      kind: 'street',
+      highway: w.tags!.highway,
+      widthPx: ROAD_WIDTH[w.tags!.highway] * TILE_SIZE,
+      points: w.geometry.map((p) => px(toTile(p))),
+      oneway,
+      bikeBothWays: oneway !== 0 && w.tags!['oneway:bicycle'] === 'no',
+    });
   }
   for (const el of els) {
     const name = tag(el, 'name');
@@ -812,6 +834,8 @@ function toTiled(m: ReturnType<typeof buildMap>, cache: Cache) {
             properties: [
               { name: 'highway', type: 'string', value: st.highway },
               { name: 'widthPx', type: 'float', value: st.widthPx },
+              ...(st.oneway ? [{ name: 'oneway', type: 'int', value: st.oneway }] : []),
+              ...(st.bikeBothWays ? [{ name: 'bikeBothWays', type: 'bool', value: true }] : []),
             ],
           };
         }),

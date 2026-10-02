@@ -42,6 +42,9 @@ const SPRITE_ANGLE_STEPS = 32;
 /** px of road per pedalling frame. */
 const PEDAL_PX = 6;
 
+/** Share of riders who ignore one-way streets. */
+const REBEL_SHARE = 0.1;
+
 /** Streets cyclists don't ride on. */
 const NO_BIKES = new Set(['pedestrian', 'footway', 'steps', 'path']);
 
@@ -51,6 +54,8 @@ interface Street {
   pts: Pt[];
   /** Half the road width (px). */
   half: number;
+  /** 1: one-way in drawing order, -1: one-way against it, 0: both ways (or bikes exempt). */
+  oneway: number;
 }
 
 /** A point on the network: street index and vertex index. */
@@ -68,6 +73,8 @@ interface Cyclist {
   heading: number;
   v: number;
   cruise: number;
+  /** Ignores one-way streets. */
+  rebel: boolean;
   /** The rider being overtaken, and how far (px) we've swung out towards the middle of the road. */
   passing?: Cyclist;
   passTime: number;
@@ -110,7 +117,9 @@ export class CyclistTraffic {
     for (const o of map.layers.find((l) => l.name === 'streets')?.objects ?? []) {
       if (o.type !== 'street' || !o.polyline || o.polyline.length < 2) continue;
       if (NO_BIKES.has(prop<string>(o.properties, 'highway') ?? '')) continue;
-      this.streets.push({ pts: o.polyline.map((p) => ({ x: o.x + p.x, y: o.y + p.y })), half: (prop<number>(o.properties, 'widthPx') ?? 64) / 2 });
+      // Bikes allowed both ways ("utom cykel") count as two-way for cyclists.
+      const oneway = prop<boolean>(o.properties, 'bikeBothWays') ? 0 : (prop<number>(o.properties, 'oneway') ?? 0);
+      this.streets.push({ pts: o.polyline.map((p) => ({ x: o.x + p.x, y: o.y + p.y })), half: (prop<number>(o.properties, 'widthPx') ?? 64) / 2, oneway });
     }
     // Junctions: streets meeting at the same vertex (OSM ways share their junction nodes).
     const at = new Map<string, Node[]>();
@@ -141,6 +150,12 @@ export class CyclistTraffic {
     return Math.hypot(st.pts[c.to].x - st.pts[c.from].x, st.pts[c.to].y - st.pts[c.from].y);
   }
 
+  /** May a law-abiding cyclist ride street `s` from vertex `from` to `to`? */
+  private allowed(s: number, from: number, to: number) {
+    const ow = this.streets[s].oneway;
+    return ow === 0 || Math.sign(to - from) === ow;
+  }
+
   /** At the end of a segment: carry on along the street, or turn onto another one at a junction. */
   private nextSegment(c: Cyclist) {
     const st = this.streets[c.street];
@@ -160,7 +175,9 @@ export class CyclistTraffic {
       const dy = p[o.to].y - p[o.from].y;
       return (dx * dir.dx + dy * dir.dy) / (Math.hypot(dx, dy) || 1) > -0.7;
     });
-    const pick = fwd.length ? fwd : [{ s: c.street, from: c.to, to: c.from }];
+    // Most riders keep to one-way streets; a dead end that's one-way the other way forces a turn back.
+    const legal = c.rebel ? fwd : fwd.filter((o) => this.allowed(o.s, o.from, o.to));
+    const pick = legal.length ? legal : fwd.length && c.rebel ? fwd : [{ s: c.street, from: c.to, to: c.from }];
     // Mostly carry straight on; sometimes turn.
     const straight = pick.find((o) => o.s === c.street);
     const o = straight && this.rand() < 0.55 ? straight : pick[Math.floor(this.rand() * pick.length)];
@@ -182,7 +199,9 @@ export class CyclistTraffic {
     );
     for (let k = 0; k < 4 && near.length; k++) {
       const { s, i } = near[Math.floor(this.rand() * near.length)];
-      const forward = this.rand() < 0.5;
+      const rebel = this.rand() < REBEL_SHARE;
+      const ow = this.streets[s].oneway;
+      const forward = ow === 0 || rebel ? this.rand() < 0.5 : ow > 0;
       const v = Math.floor(this.rand() * CYCLISTS.variants);
       const c: Cyclist = {
         street: s,
@@ -195,6 +214,7 @@ export class CyclistTraffic {
         v: 0,
         cruise: this.cruiseSpeed(),
         passTime: 0,
+        rebel,
         shift: 0,
         down: 0,
         bell: 0,
