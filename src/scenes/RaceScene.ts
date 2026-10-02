@@ -12,6 +12,7 @@ import { NightLighting } from '../game/Lighting';
 import { VEHICLES, vehicleById } from '../game/vehicles';
 import { Waterway } from '../game/water';
 import { TramTraffic } from '../game/Trams';
+import { Crowd } from '../game/People';
 
 const SKID_POOL = 600;
 const SKID_SLIP = 22; // px/s of sideways speed before tyres leave marks
@@ -48,6 +49,7 @@ export class RaceScene extends Phaser.Scene {
   private lighting!: NightLighting;
   private wasDown = false;
   private trams!: TramTraffic;
+  private crowd!: Crowd;
 
   constructor() {
     super('Race');
@@ -82,6 +84,7 @@ export class RaceScene extends Phaser.Scene {
     this.car.water = water;
     this.trams = new TramTraffic(this, mapData, NPC_TRAM_LINES);
     this.car.obstacleAt = (x, y) => this.trams.solidAt(x, y);
+    this.crowd = new Crowd(this, this.track, mapData, this.trams);
     this.controls = new Controls(this);
 
     for (let i = 0; i < SKID_POOL; i++)
@@ -170,6 +173,11 @@ export class RaceScene extends Phaser.Scene {
     const input = this.controls.read();
     this.trams.update(delta, car);
     car.update(input, delta, time);
+    // Knocking someone over costs a little speed.
+    if (this.crowd.update(delta, this.cameras.main.worldView, car) > 0) {
+      car.vx *= 0.8;
+      car.vy *= 0.8;
+    }
     this.track.updateChunks(this.cameras.main.worldView);
 
     // Camera leads the car a little in the direction of travel.
